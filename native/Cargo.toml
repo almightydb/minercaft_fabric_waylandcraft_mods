@@ -3,5 +3,8 @@ name = "waylandcraft"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "waylandcraft"
+
 [dependencies]
 smithay = { version = "0.7.0", default-features = false, features = [ "wayland_frontend", "backend_drm" ] }

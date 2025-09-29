@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::ops::DerefMut;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::ffi::OsString;
 use smithay::{
     reexports::{
         calloop::{
@@ -44,8 +45,14 @@ use smithay::{
     delegate_xdg_shell,
 };
 
+pub struct WaylandCraft<'a> {
+    pub state: WLCState,
+    pub event_loop: EventLoop<'a, WLCState>,
+}
+
 pub struct WLCState {
     pub display_handle: DisplayHandle,
+    pub socket: OsString,
     pub compositor_state: CompositorState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
@@ -69,6 +76,7 @@ impl WLCState {
 
         Self {
             display_handle: disp.clone(),
+            socket: OsString::new(),
             compositor_state,
             shm_state,
             seat_state,
@@ -181,11 +189,9 @@ impl WLCClient {
 
 impl ClientData for WLCClient {
     fn initialized(&self, _id: ClientId) {
-        println!("Client connected!");
     }
 
     fn disconnected(&self, _id: ClientId, _reason: DisconnectReason) {
-        println!("Client disconnected!");
     }
 }
 
@@ -237,16 +243,14 @@ fn register_virtual_output(state: &mut WLCState) {
     output.create_global::<WLCState>(&state.display_handle);
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Hello, world!");
-
-    let mut event_loop: EventLoop<WLCState> = EventLoop::try_new()?;
+pub fn wlc_init() -> Result<WaylandCraft<'static>, Box<dyn std::error::Error>> {
+    let event_loop: EventLoop<WLCState> = EventLoop::try_new()?;
     let display: Display<WLCState> = Display::new()?;
     let socket = ListeningSocketSource::new_auto()?;
 
-    println!("Listening on: '{}'", socket.socket_name().to_str().unwrap());
-
     let mut state = WLCState::new(display.handle());
+    state.socket = socket.socket_name().to_os_string();
+
     register_virtual_output(&mut state);
 
     let ev_handle = event_loop.handle();
@@ -266,9 +270,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(calloop::PostAction::Continue)
     }).unwrap();
 
-    loop {
-        event_loop.dispatch(Some(Duration::ZERO), &mut state).unwrap();
-        send_frame(&mut state);
+    Ok(WaylandCraft { state, event_loop })
+}
+
+impl<'a> WaylandCraft<'a> {
+    pub fn update(&mut self) {
+        let state = &mut self.state;
+        let event_loop = &mut self.event_loop;
+        event_loop.dispatch(Some(Duration::ZERO), state).unwrap();
+        send_frame(state);
         state.display_handle.flush_clients().unwrap();
     }
 }
