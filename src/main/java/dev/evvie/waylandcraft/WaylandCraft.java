@@ -5,10 +5,13 @@ import org.slf4j.LoggerFactory;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import dev.evvie.waylandcraft.bridge.WaylandCraftBridge;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
@@ -16,7 +19,9 @@ import net.minecraft.world.phys.Vec3;
 public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	public static final String MOD_ID = "waylandcraft";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-
+	
+	private WaylandCraftBridge bridge = null;
+	
 	@Override
 	public void onInitialize() {
 	}
@@ -26,6 +31,13 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		LOGGER.info("Initializing WaylandCraft");
 		
 		WorldRenderEvents.END.register(context -> {
+			if(bridge == null) {
+				bridge = WaylandCraftBridge.start();
+				String socket = bridge.getSocket();
+				Minecraft.getInstance().gui.getChat().addMessage(Component.literal("Server started on " + socket));
+			}
+			bridge.update();
+			
 			RenderSystem.enableDepthTest();
 			Vec3 vec = new Vec3(-250, 65, -500);
 			RenderUtils.drawTexturedQuad(context.camera(), new ResourceLocation("waylandcraft", "icon.png"),

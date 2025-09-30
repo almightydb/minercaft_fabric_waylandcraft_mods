@@ -62,7 +62,7 @@ pub struct WLCState {
 }
 
 impl WLCState {
-    pub fn new(disp: DisplayHandle) -> Self {
+    fn new(disp: DisplayHandle) -> Self {
         let compositor_state = CompositorState::new::<WLCState>(&disp);
         let shm_state = ShmState::new::<WLCState>(&disp, vec![]);
 

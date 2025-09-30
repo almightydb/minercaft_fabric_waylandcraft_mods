@@ -59,6 +59,14 @@ jar {
 	}
 }
 
+loom {
+	runs {
+		client {
+			environmentVariable("LD_LIBRARY_PATH", "../native/target/debug/")
+		}
+	}
+}
+
 // configure the maven publication
 publishing {
 	publications {
