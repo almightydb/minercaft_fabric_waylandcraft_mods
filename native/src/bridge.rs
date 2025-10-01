@@ -18,14 +18,14 @@ use smithay::{
 };
 use jni::{
     objects::{JClass, JObject},
-    sys::{jlong, jstring, jarray, jsize, jobject, jint, jvalue},
+    sys::{jlong, jstring, jarray, jsize, jint, jvalue},
     signature::{ReturnType, Primitive},
     JNIEnv,
 };
 
 pub(crate) struct BridgeState {
     toplevels: Vec<Box<ToplevelSurface>>,
-    surfaces: Vec<WlSurface>,
+    surfaces: Vec<Box<WlSurface>>,
 }
 
 impl BridgeState {
@@ -88,6 +88,42 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_socket<'l>(
     env.new_string(socket).unwrap().into_raw()
 }
 
+// Get or insert an element and return its handle
+fn insert_get_handle<T>(vec: &mut Vec<Box<T>>, elem: &T) -> jlong
+    where T: Clone + PartialEq
+{
+    if !vec.iter().any(|b| **b == *elem) {
+        vec.push(Box::new(elem.clone()));
+    }
+
+    let ptr: &mut T = vec
+        .iter_mut()
+        .find(|r| ***r == *elem)
+        .unwrap();
+    ((ptr as *mut T) as usize) as jlong
+}
+
+// Insert all elements that aren't in the list already
+fn insert_all<T>(vec: &mut Vec<Box<T>>, elems: &[T])
+    where T: Clone + PartialEq
+{
+    for elem in elems {
+        if !vec.iter().any(|b| **b == *elem) {
+            vec.push(Box::new(elem.clone()));
+        }
+    }
+}
+
+// Get handles of all elements in the list
+fn get_all_handles<T>(vec: &mut Vec<Box<T>>) -> Vec<jlong>
+    where T: Clone + PartialEq
+{
+    vec
+        .iter_mut()
+        .map(|r| ((&mut **r) as *mut T) as usize as jlong)
+        .collect()
+}
+
 #[unsafe(no_mangle)]
 pub extern "system"
 fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevels<'l>(
@@ -97,19 +133,14 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevels<'l>(
 ) -> jarray {
     let instance = jptr_to_instance(ptr);
 
-    for toplevel in instance.state.xdg_state.toplevel_surfaces() {
-        if !instance.bridge.toplevels.iter().any(|b| **b == *toplevel) {
-            instance.bridge.toplevels.push(Box::new(toplevel.clone()));
-        }
-    }
+    insert_all(
+        &mut instance.bridge.toplevels,
+        instance.state.xdg_state.toplevel_surfaces()
+    );
 
-    let toplevels: Vec<jlong> = instance.bridge.toplevels
-        .iter_mut()
-        .filter(|t| t.alive())
-        .map(|r| &mut **r as *mut ToplevelSurface)
-        .map(|ptr| (ptr as usize) as jlong)
-        .collect();
+    instance.bridge.toplevels.retain(|t| t.alive());
 
+    let toplevels = get_all_handles(&mut instance.bridge.toplevels);
     let array = env.new_long_array(toplevels.len() as jsize).unwrap();
     env.set_long_array_region(&array, 0, &toplevels).unwrap();
     array.into_raw()
@@ -187,7 +218,7 @@ fn jptr_to_toplevel(ptr: jlong) -> &'static mut ToplevelSurface {
 #[unsafe(no_mangle)]
 pub extern "system"
 fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevelSurface<'l>(
-    mut env: JNIEnv<'l>,
+    _env: JNIEnv<'l>,
     _class: JClass<'l>,
     ptr: jlong,
     handle: jlong
@@ -196,15 +227,5 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevelSurface<'l>(
     let toplevel: &mut ToplevelSurface = jptr_to_toplevel(handle);
     let surface: &WlSurface = toplevel.wl_surface();
 
-    if !instance.bridge.surfaces.contains(surface) {
-        instance.bridge.surfaces.push(surface.clone());
-    }
-
-    let ptr: &mut WlSurface = instance.bridge.surfaces
-        .iter_mut()
-        .find(|s| *s == surface)
-        .unwrap();
-    let ptr = ((ptr as *mut WlSurface) as usize) as jlong;
-
-    ptr
+    insert_get_handle(&mut instance.bridge.surfaces, surface)
 }
