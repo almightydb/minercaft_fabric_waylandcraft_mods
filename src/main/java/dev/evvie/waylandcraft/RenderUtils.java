@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.system.MemoryUtil;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -63,24 +64,25 @@ public class RenderUtils {
 	}
 	
 	private static BufferTexture testTexture;
+	private static ByteBuffer testTextureData;
 	public static int getTestTexture(int offset) {
 		int width = 500;
 		int height = 500;
 		
 		if(testTexture == null) {
-			ByteBuffer buf = ByteBuffer.allocateDirect(width * height * 4);
-			testTexture = new BufferTexture(buf, width, height);
+			testTextureData = ByteBuffer.allocateDirect(width * height * 4);
+			testTexture = new BufferTexture(MemoryUtil.memAddress0(testTextureData), width, height);
 		}
 		
-		testTexture.data.clear();
+		testTextureData.clear();
 		for(int i = 0; i < width * height; i++) {
 			int j = i % width - offset;
 			int k = i / width;
 			// For little endian ARGB 0123, for big endian RGBA 2103
-			testTexture.data.put(i * 4 + 0, (byte) (int) ((k / 50) * 50.0f / ((height / 50) * 50.0f) * 255.0f));
-			testTexture.data.put(i * 4 + 1, (byte) ((k % 50) * 5));
-			testTexture.data.put(i * 4 + 2, (byte) ((j % 50) * 5));
-			testTexture.data.put(i * 4 + 3, (byte) 255);
+			testTextureData.put(i * 4 + 0, (byte) (int) ((k / 50) * 50.0f / ((height / 50) * 50.0f) * 255.0f));
+			testTextureData.put(i * 4 + 1, (byte) ((k % 50) * 5));
+			testTextureData.put(i * 4 + 2, (byte) ((j % 50) * 5));
+			testTextureData.put(i * 4 + 3, (byte) 255);
 		}
 		testTexture.update();
 		return testTexture.getId();

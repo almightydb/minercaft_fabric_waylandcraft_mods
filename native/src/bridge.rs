@@ -140,24 +140,27 @@ fn create_surface<'l>(
         None
     };
     if let Some(buf) = maybe_buf {
-        let _ = with_buffer_contents(buf, |ptr, _len, data| {
-            let width = data.width as jint;
-            let height = data.height as jint;
-            let ptr = (ptr as usize) as jlong;
+        let _ = with_buffer_contents(buf, |ptr, _len, metadata| {
+            let width = metadata.width as jint;
+            let height = metadata.height as jint;
             unsafe {
+                let ptr = ptr.offset(metadata.offset as isize);
+                let jptr = (ptr as usize) as jlong;
+                let sig = "(JII)V";
                 env.call_method_unchecked(
                     &obj,
-                    (class_name, "attachShmBuffer", "(IIJ)V"),
+                    (class_name, "attachShmBuffer", sig),
                     ReturnType::Primitive(Primitive::Void),
                     &[
+                        jvalue { j: jptr },
                         jvalue { i: width },
                         jvalue { i: height },
-                        jvalue { j: ptr }
                     ]
                 ).unwrap();
             }
         });
-        //buf.release();
+        buf.release();
+        attr.buffer = None;
     }
 
     obj

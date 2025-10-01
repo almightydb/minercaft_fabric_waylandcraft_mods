@@ -4,6 +4,8 @@ import java.util.ArrayList;
 
 import org.apache.commons.lang3.ArrayUtils;
 
+import dev.evvie.waylandcraft.BufferTexture;
+
 public class WaylandCraftBridge {
 	
 	private long instance;
@@ -43,7 +45,14 @@ public class WaylandCraftBridge {
 		
 		for(long handle : toplevels) {
 			WLCToplevel toplevel = getOrCreate(handle);
-			WLCSurface root = surfaceTree(this.instance, handle);
+			
+			WLCSurface root = toplevel.getSurfaceTree();
+			BufferTexture buf;
+			if(root != null && (buf = root.getBuffer()) != null) {
+				buf.release();
+			}
+			
+			root = surfaceTree(this.instance, handle);
 			toplevel.setSurface(root);
 		}
 	}

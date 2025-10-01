@@ -4,6 +4,8 @@ import java.util.OptionalInt;
 
 import org.jetbrains.annotations.Nullable;
 
+import dev.evvie.waylandcraft.BufferTexture;
+
 /* Surface render object
  * 
  * Not persistent! Only meant for rendering!
@@ -16,7 +18,7 @@ public class WLCSurface {
 	protected int id = -1;
 	
 	@Nullable
-	private WLCBuffer buffer = null;
+	private BufferTexture buffer = null;
 	
 	// Either a child of this surface or one of its siblings
 	@Nullable
@@ -46,8 +48,11 @@ public class WLCSurface {
 		this.nextChild = surface;
 	}
 	
-	protected void attachShmBuffer(int width, int height, long shmDataPtr) {
-		this.buffer = new WLCBuffer(width, height, shmDataPtr);
+	protected void attachShmBuffer(long ptr, int width, int height) {
+		if(this.buffer != null) {
+			this.buffer.release();
+		}
+		this.buffer = new BufferTexture(ptr, width, height);
 	}
 	
 	protected void setXOff(int xoff) {
@@ -59,7 +64,7 @@ public class WLCSurface {
 	}
 	
 	@Nullable
-	public WLCBuffer getBuffer() {
+	public BufferTexture getBuffer() {
 		return this.buffer;
 	}
 	

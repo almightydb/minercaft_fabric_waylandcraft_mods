@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 
-import dev.evvie.waylandcraft.bridge.WLCBuffer;
 import dev.evvie.waylandcraft.bridge.WLCToplevel;
 import dev.evvie.waylandcraft.bridge.WaylandCraftBridge;
 import net.fabricmc.api.ClientModInitializer;
@@ -28,10 +27,10 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	}
 
 	private void renderToplevelAt(WorldRenderContext ctx, WLCToplevel toplevel, Vec3 pos) {
-		WLCBuffer buf = toplevel.getSurfaceTree().getBuffer();
+		BufferTexture buf = toplevel.getSurfaceTree().getBuffer();
 		if(buf == null) return;
 		
-		RenderUtils.drawTexturedQuad(ctx.camera(), buf.getAsTexture().getId(),
+		RenderUtils.drawTexturedQuad(ctx.camera(), buf.getId(),
 				pos, pos.add(1, 0, 0), pos.add(1, 1, 0), pos.add(0, 1, 0),
 				new Vec2(0, 1), new Vec2(1, 1), new Vec2(1, 0), new Vec2(0, 0));
 	}
