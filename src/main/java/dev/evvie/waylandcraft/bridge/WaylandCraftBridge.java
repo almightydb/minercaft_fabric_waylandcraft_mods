@@ -3,6 +3,7 @@ package dev.evvie.waylandcraft.bridge;
 import java.util.ArrayList;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWNativeEGL;
 
@@ -279,6 +280,22 @@ public class WaylandCraftBridge {
 		pointerAxis(instance, axis, value);
 	}
 	
+	public void focusSurface(@Nullable WLCSurface surface) {
+		long handle = 0;
+		if(surface != null) {
+			handle = surface.getHandle();
+		}
+		keyboardFocus(instance, handle);
+	}
+	
+	public void pressKey(int scancode) {
+		keyboardInput(instance, scancode, 1);
+	}
+	
+	public void releaseKey(int scancode) {
+		keyboardInput(instance, scancode, 0);
+	}
+	
 	private static native long init(long glfwGetProcAddress, long eglDisplay);
 	private static native void update(long instance);
 	private static native String socket(long instance);
@@ -315,6 +332,12 @@ public class WaylandCraftBridge {
 	
 	// Create pointer axis event. `axis` is the scroll axis (0 for vertical, 1 for horizontal)
 	private static native void pointerAxis(long instance, int axis, double value);
+	
+	// Set keyboard focus to a wayland surface. The handle may be 0 to unfocus any surfaces
+	private static native void keyboardFocus(long instance, long surfaceHandle);
+	
+	// Keyboard input. scancode is the raw keycode. action: 0 is released, 1 is pressed.
+	private static native void keyboardInput(long instance, int scancode, int action);
 	
 	private static native void freeSurface(long instance, long handle);
 	private static native void freeToplevel(long instance, long handle);

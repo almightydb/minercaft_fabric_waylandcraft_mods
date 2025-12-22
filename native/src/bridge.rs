@@ -17,14 +17,17 @@ use smithay::{
         single_pixel_buffer::get_single_pixel_buffer,
         dmabuf::get_dmabuf,
     },
-    input::pointer::{MotionEvent, ButtonEvent, AxisFrame},
+    input::{
+        pointer::{MotionEvent, ButtonEvent, AxisFrame},
+        keyboard::self,
+    },
     utils::{Point, Logical, SERIAL_COUNTER, Size},
     backend::{
         allocator::{
             dmabuf::WeakDmabuf,
             Buffer,
         },
-        input::{ButtonState, Axis},
+        input::{ButtonState, Axis, KeyState, Keycode},
     },
     reexports::{
         wayland_server::{
@@ -827,6 +830,56 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_pointerAxis<'l>(
         event,
     );
     pointer.frame(&mut instance.state);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_keyboardFocus<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+    handle: jlong
+) {
+    let instance = jptr_to_instance(ptr);
+    let surface: Option<WlSurface> = if handle != 0 {
+        Some(jptr_to_wlsurface(handle).clone())
+    } else { None };
+
+    let keyboard = instance.state.seat.get_keyboard().unwrap();
+    keyboard.set_focus(
+        &mut instance.state,
+        surface,
+        SERIAL_COUNTER.next_serial()
+    );
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_keyboardInput<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+    scancode: jint,
+    action: jint
+) {
+    let instance = jptr_to_instance(ptr);
+
+    let scancode = Keycode::new(scancode as u32);
+    let action = match action {
+        0 => KeyState::Released,
+        1 => KeyState::Pressed,
+        _ => {return;}
+    };
+
+    let keyboard = instance.state.seat.get_keyboard().unwrap();
+    keyboard.input(
+        &mut instance.state,
+        scancode,
+        action,
+        SERIAL_COUNTER.next_serial(),
+        get_time(),
+        |_,_,_| keyboard::FilterResult::<()>::Forward
+    );
 }
 
 #[unsafe(no_mangle)]

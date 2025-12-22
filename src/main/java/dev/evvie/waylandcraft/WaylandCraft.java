@@ -1,5 +1,6 @@
 package dev.evvie.waylandcraft;
 
+import java.awt.Color;
 import java.util.ArrayList;
 
 import org.slf4j.Logger;
@@ -15,8 +16,10 @@ import dev.evvie.waylandcraft.bridge.WaylandCraftBridge;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.CoreShaderRegistrationCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
 
@@ -29,6 +32,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	public WaylandCraftBridge bridge = null;
 	public ArrayList<Window> windows = new ArrayList<Window>();
 	public WindowHitResult hitResult = null;
+	public boolean keyboardCaptured = false;
 	
 	@Override
 	public void onInitialize() {
@@ -68,6 +72,14 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			windows.forEach((w) -> w.render(context));
 			
 			sendMotionEvents();
+		});
+		
+		HudRenderCallback.EVENT.register((context, delta) -> {
+			if(WaylandCraft.instance.keyboardCaptured) {
+				String text = "KEYBOARD CAPTURED [PRESS F7]";
+				Font font = Minecraft.getInstance().font;
+				context.drawString(Minecraft.getInstance().font, text, context.guiWidth() - font.width(text) - 10, 10, Color.red.getRGB());
+			}
 		});
 		
 		CoreShaderRegistrationCallback.EVENT.register(context -> {

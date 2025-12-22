@@ -5,7 +5,8 @@
 	"mixins": [
 		"GameRendererMixin",
 		"MouseHandlerMixin",
-		"WindowMixin"
+		"WindowMixin",
+		"KeyboardHandlerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
