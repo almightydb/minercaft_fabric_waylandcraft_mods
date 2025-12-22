@@ -51,6 +51,11 @@ public class Window {
 		return backing.isAlive();
 	}
 	
+	public void rotate(Vec3 normal, Vec3 down) {
+		this.normal = normal;
+		this.down = down;
+	}
+	
 	public Vec3 normal() {
 		return normal;
 	}
@@ -73,6 +78,17 @@ public class Window {
 	
 	public Vec3 origin() {
 		return pivot.add(localX().scale(-width/2)).add(localY().scale(-height/2));
+	}
+	
+	public Vec3 localToWorld(double x, double y, double z) {
+		Vec3 origin = origin();
+		Vec3 localX = localX();
+		Vec3 localY = localY();
+		return origin.add(localX.scale(x)).add(localY.scale(y)).add(normal.scale(z));
+	}
+	
+	public void moveOrigin(Vec3 pos) {
+		pivot = pos.add(localX().scale(width/2)).add(localY().scale(height/2));
 	}
 	
 	private void updateGeometry() {
@@ -112,7 +128,7 @@ public class Window {
 		
 		BufferTexture buf = surface.getBuffer();
 		
-		WaylandCraft.LOGGER.info("SURFACE D: " + depth + ", X: " + surface.xSubpos + ", Y: " + surface.ySubpos + ", W: " + surface.width() + ", H: " + surface.height() + ", BUF: " + buf);
+//		WaylandCraft.LOGGER.info("SURFACE D: " + depth + ", X: " + surface.xSubpos + ", Y: " + surface.ySubpos + ", W: " + surface.width() + ", H: " + surface.height() + ", BUF: " + buf);
 		
 		if(buf == null) return;
 		

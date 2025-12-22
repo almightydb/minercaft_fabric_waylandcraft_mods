@@ -3,10 +3,14 @@ use crate::{WaylandCraft, wlc_init, get_time};
 use crate::egl::{EGLHelper, EGLDisplay};
 use smithay::{
     wayland::{
-        shell::xdg::{ToplevelSurface, PopupSurface},
+        shell::xdg::{
+            ToplevelSurface, PopupSurface, XDG_POPUP_ROLE,
+            XdgPopupSurfaceData
+        },
         compositor::{
             SurfaceAttributes, BufferAssignment, with_states, SurfaceData,
-            with_surface_tree_upward, TraversalAction, SubsurfaceCachedState
+            with_surface_tree_upward, TraversalAction, SubsurfaceCachedState,
+            get_role
         },
         shm::{self, with_buffer_contents},
         viewporter::{ViewportCachedState, ensure_viewport_valid},
@@ -561,14 +565,29 @@ pub extern "system"
 fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_popupOffset<'l>(
     env: JNIEnv<'l>,
     _class: JClass<'l>,
-    ptr: jlong,
     handle: jlong
 ) -> jarray {
-    let _instance = jptr_to_instance(ptr);
-    let _popup: &mut PopupSurface = jptr_to_popup(handle);
+    let popup: &mut PopupSurface = jptr_to_popup(handle);
+    let surface = popup.wl_surface();
 
-    // TODO: Implement this
-    let offset: [jint; 2] = [0, 0];
+    let mut offset: [jint; 2] = [0, 0];
+
+    if get_role(surface) == Some(XDG_POPUP_ROLE) {
+        with_states(surface, |states| {
+            let attr_guard = states
+                .data_map
+                .get::<XdgPopupSurfaceData>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            let position = attr_guard
+                .current
+                .geometry
+                .loc;
+            offset[0] = position.x;
+            offset[1] = position.y;
+        });
+    }
 
     let array = env.new_int_array(2).unwrap();
     env.set_int_array_region(&array, 0, &offset).unwrap();

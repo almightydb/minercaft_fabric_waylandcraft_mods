@@ -7,7 +7,6 @@ import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWNativeEGL;
 
 import dev.evvie.waylandcraft.BufferTexture.DmabufTexture;
-import dev.evvie.waylandcraft.WaylandCraft;
 import net.minecraft.client.Minecraft;
 
 public class WaylandCraftBridge {
@@ -190,7 +189,7 @@ public class WaylandCraftBridge {
 			WLCPopup popup = getOrCreatePopup(handle);
 			findPopupParent(popup);
 			
-			int[] offset = popupOffset(this.instance, handle);
+			int[] offset = popupOffset(handle);
 			popup.offsetX = offset[0];
 			popup.offsetY = offset[1];
 			
@@ -222,7 +221,6 @@ public class WaylandCraftBridge {
 		
 		// Update all surface buffers
 		for(WLCPopup popup : popups) {
-			WaylandCraft.LOGGER.info("POPUP");
 			WLCSurface root = popup.getSurfaceTree();
 			for(WLCSurface surface = root; surface != null; surface = surface.getNextChild()) {
 				updateSurfaceData(instance, surface);
@@ -293,7 +291,7 @@ public class WaylandCraftBridge {
 	private static native long popupParent(long instance, long handle);
 	// Query popup local offset coordinates
 	// Returns two-element list containing x,y
-	private static native int[] popupOffset(long instance, long handle);
+	private static native int[] popupOffset(long handle);
 	
 	private static native long[] dmabufs(long instance);
 	

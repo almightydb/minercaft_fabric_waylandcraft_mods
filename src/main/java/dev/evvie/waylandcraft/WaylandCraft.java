@@ -60,10 +60,8 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			}
 			windows.removeIf((w) -> !w.isAlive());
 			
-			Vec3 pos = new Vec3(-250, 65, -500);
-			for(Window window : windows) {
-				window.pivot = pos;
-				pos = pos.add(3, 0, 0);
+			for(WLCPopup popup : bridge.getPopups()) {
+				anchorToParent(popup);
 			}
 			
 			RenderSystem.enableDepthTest();
@@ -75,6 +73,19 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		CoreShaderRegistrationCallback.EVENT.register(context -> {
 			RenderUtils.registerShaders(context);
 		});
+	}
+	
+	private void anchorToParent(WLCPopup popup) {
+		Window window = windows.stream().filter((w) -> w.backing == popup).findAny().get();
+		Window parent = windows.stream().filter((w) -> w.backing == popup.getParent()).findAny().get();
+		
+		// If the parent is also a popup, first make it anchor itself
+		if(parent.backing instanceof WLCPopup) {
+			anchorToParent((WLCPopup) parent.backing);
+		}
+		
+		window.rotate(parent.normal(), parent.down());
+		window.moveOrigin(parent.localToWorld(popup.offsetX, popup.offsetY, 0.05));
 	}
 	
 	private void sendMotionEvents() {
