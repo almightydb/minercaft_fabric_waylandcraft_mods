@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import com.mojang.blaze3d.systems.RenderSystem;
 
 import dev.evvie.waylandcraft.Window.WindowHitResult;
+import dev.evvie.waylandcraft.bridge.WLCPopup;
 import dev.evvie.waylandcraft.bridge.WLCSurface;
 import dev.evvie.waylandcraft.bridge.WLCToplevel;
 import dev.evvie.waylandcraft.bridge.WaylandCraftBridge;
@@ -48,11 +49,22 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			bridge.update();
 			
 			for(WLCToplevel toplevel : bridge.getToplevels()) {
-				if(!windows.stream().anyMatch((w) -> w.toplevel == toplevel)) {
+				if(!windows.stream().anyMatch((w) -> w.backing == toplevel)) {
 					windows.add(new Window(toplevel));
 				}
 			}
+			for(WLCPopup popup : bridge.getPopups()) {
+				if(!windows.stream().anyMatch((w) -> w.backing == popup)) {
+					windows.add(new Window(popup));
+				}
+			}
 			windows.removeIf((w) -> !w.isAlive());
+			
+			Vec3 pos = new Vec3(-250, 65, -500);
+			for(Window window : windows) {
+				window.pivot = pos;
+				pos = pos.add(3, 0, 0);
+			}
 			
 			RenderSystem.enableDepthTest();
 			windows.forEach((w) -> w.render(context));
@@ -81,7 +93,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 				return;
 			}
 			
-			for(WLCSurface surface = w.toplevel.getSurfaceTreeLast(); surface != null; surface = surface.getPrevChild()) {
+			for(WLCSurface surface = w.backing.getSurfaceTreeLast(); surface != null; surface = surface.getPrevChild()) {
 				Vec3 rel = coords.subtract(surface.xSubpos, surface.ySubpos, 0);
 				
 				int width = surface.width();

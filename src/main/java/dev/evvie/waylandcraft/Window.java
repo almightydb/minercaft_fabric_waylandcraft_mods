@@ -11,6 +11,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
+import dev.evvie.waylandcraft.bridge.WLCAbstractWindow;
+import dev.evvie.waylandcraft.bridge.WLCPopup;
 import dev.evvie.waylandcraft.bridge.WLCSurface;
 import dev.evvie.waylandcraft.bridge.WLCSurface.ViewportSource;
 import dev.evvie.waylandcraft.bridge.WLCToplevel;
@@ -23,7 +25,7 @@ public class Window {
 	
 	private static final float PIXEL_SCALE = 1.0f / 500;
 	
-	public final WLCToplevel toplevel;
+	public final WLCAbstractWindow backing;
 	
 	// World position of window
 	public Vec3 pivot = new Vec3(-250, 65, -500);
@@ -38,11 +40,15 @@ public class Window {
 	private int height;
 	
 	public Window(WLCToplevel toplevel) {
-		this.toplevel = toplevel;
+		this.backing = toplevel;
+	}
+	
+	public Window(WLCPopup popup) {
+		this.backing = popup;
 	}
 	
 	public boolean isAlive() {
-		return toplevel.isAlive();
+		return backing.isAlive();
 	}
 	
 	public Vec3 normal() {
@@ -70,7 +76,7 @@ public class Window {
 	}
 	
 	private void updateGeometry() {
-		WLCSurface root = toplevel.getSurfaceTree();
+		WLCSurface root = backing.getSurfaceTree();
 		width = root.width();
 		height = root.height();
 	}
@@ -91,7 +97,7 @@ public class Window {
 //		}
 		
 		int depth = 0;
-		for(WLCSurface surface = toplevel.getSurfaceTree(); surface != null; surface = surface.getNextChild()) {
+		for(WLCSurface surface = backing.getSurfaceTree(); surface != null; surface = surface.getNextChild()) {
 			renderSurface(ctx, surface, depth);
 			depth++;
 		}
@@ -106,7 +112,7 @@ public class Window {
 		
 		BufferTexture buf = surface.getBuffer();
 		
-		//WaylandCraft.LOGGER.info("SURFACE D: " + depth + ", X: " + surface.xSubpos + ", Y: " + surface.ySubpos + ", W: " + surface.width() + ", H: " + surface.height() + ", BUF: " + buf);
+		WaylandCraft.LOGGER.info("SURFACE D: " + depth + ", X: " + surface.xSubpos + ", Y: " + surface.ySubpos + ", W: " + surface.width() + ", H: " + surface.height() + ", BUF: " + buf);
 		
 		if(buf == null) return;
 		
@@ -149,6 +155,7 @@ public class Window {
 		else if(buf.format == BufferTexture.FORMAT_ARGB8888) {
 			RenderSystem.setShader(GameRenderer::getPositionColorTexShader);
 		}
+//		RenderSystem.setShader(RenderUtils::getPositionColorTexShader);
 		
 		RenderSystem.setShaderTexture(0, buf.id);
 		RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
@@ -171,7 +178,7 @@ public class Window {
 		WindowBounds bounds = new WindowBounds();
 		WLCSurface surface;
 		
-		for(surface = toplevel.getSurfaceTree(); surface != null; surface = surface.getNextChild()) {
+		for(surface = backing.getSurfaceTree(); surface != null; surface = surface.getNextChild()) {
 			int minX = surface.xSubpos;
 			int minY = surface.ySubpos;
 			int maxX = minX + surface.width();

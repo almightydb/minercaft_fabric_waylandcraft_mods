@@ -7,12 +7,14 @@ import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWNativeEGL;
 
 import dev.evvie.waylandcraft.BufferTexture.DmabufTexture;
+import dev.evvie.waylandcraft.WaylandCraft;
 import net.minecraft.client.Minecraft;
 
 public class WaylandCraftBridge {
 	
 	private long instance;
 	private ArrayList<WLCToplevel> toplevels = new ArrayList<WLCToplevel>();
+	private ArrayList<WLCPopup> popups = new ArrayList<WLCPopup>();
 	private ArrayList<WLCSurface> surfaces = new ArrayList<WLCSurface>();
 	private ArrayList<DmabufTexture> dmabufs = new ArrayList<DmabufTexture>();
 	
@@ -50,6 +52,22 @@ public class WaylandCraftBridge {
 		return toplevel;
 	}
 	
+	protected WLCPopup getOrCreatePopup(long handle) {
+		for(WLCPopup popup : popups) {
+			if(popup.getHandle() == handle) return popup;
+		}
+		WLCPopup popup = new WLCPopup(handle);
+		
+		long surfaceHandle = popupSurface(this.instance, handle);
+		WLCSurface surface = getOrCreateSurface(surfaceHandle);
+		popup.surface = surface;
+		
+		popup.parentHandle = popupParent(this.instance, handle);
+		
+		popups.add(popup);
+		return popup;
+	}
+	
 	protected WLCSurface getOrCreateSurface(long handle) {
 		for(WLCSurface surface : surfaces) {
 			if(surface.getHandle() == handle) return surface;
@@ -83,6 +101,19 @@ public class WaylandCraftBridge {
 		this.toplevels = toplevels_new;
 	}
 	
+	private void deleteNonExistingPopups(long[] remainingHandles) {
+		ArrayList<WLCPopup> popups_new = new ArrayList<WLCPopup>();
+		for(WLCPopup popup : this.popups) {
+			if(ArrayUtils.contains(remainingHandles, popup.getHandle())) {
+				popups_new.add(popup);
+			}
+			else {
+				freePopup(this.instance, popup.takeHandle());
+			}
+		}
+		this.popups = popups_new;
+	}
+	
 	private void deleteNonExistingDmabufs(long[] remainingHandles) {
 		ArrayList<DmabufTexture> dmabufs_new = new ArrayList<DmabufTexture>();
 		for(DmabufTexture dmabuf : this.dmabufs) {
@@ -109,6 +140,25 @@ public class WaylandCraftBridge {
 		this.surfaces = surfaces_new;
 	}
 	
+	private void findPopupParent(WLCPopup popup) {
+		// Popups cannot change their parent, so if one is found, it's the one
+		if(popup.parent != null) return;
+		
+		for(WLCToplevel toplevel : toplevels) {
+			if(toplevel.getHandle() == popup.parentHandle) {
+				popup.parent = toplevel;
+				return;
+			}
+		}
+		
+		for(WLCPopup popup2 : popups) {
+			if(popup2.getHandle() == popup.parentHandle) {
+				popup.parent = popup2;
+				return;
+			}
+		}
+	}
+	
 	public void update() {
 		// Update wayland clients
 		update(this.instance);
@@ -116,6 +166,10 @@ public class WaylandCraftBridge {
 		// Find all available toplevels and delete ones that no longer exist
 		long[] toplevel_handles = toplevels(instance);
 		deleteNonExistingToplevels(toplevel_handles);
+		
+		// Find all available popups and delete ones that no longer exist
+		long[] popup_handles = popups(instance);
+		deleteNonExistingPopups(popup_handles);
 		
 		// Reset surface visited state
 		for(WLCSurface surface : surfaces) {
@@ -128,6 +182,20 @@ public class WaylandCraftBridge {
 			WLCToplevel toplevel = getOrCreateToplevel(handle);
 			WLCSurface root = toplevel.getSurfaceTree();
 			toplevel.lastChild = updateSurfaceTree(root);
+		}
+		
+		// Create new popups when necessary
+		// Update surface tree geometry, parent relationships and offsets of all popups
+		for(long handle : popup_handles) {
+			WLCPopup popup = getOrCreatePopup(handle);
+			findPopupParent(popup);
+			
+			int[] offset = popupOffset(this.instance, handle);
+			popup.offsetX = offset[0];
+			popup.offsetY = offset[1];
+			
+			WLCSurface root = popup.getSurfaceTree();
+			popup.lastChild = updateSurfaceTree(root);
 		}
 		
 		// All surface trees have now been walked. Now delete all unvisited surfaces
@@ -146,6 +214,16 @@ public class WaylandCraftBridge {
 		// Update all surface buffers
 		for(WLCToplevel toplevel : toplevels) {
 			WLCSurface root = toplevel.getSurfaceTree();
+			for(WLCSurface surface = root; surface != null; surface = surface.getNextChild()) {
+				updateSurfaceData(instance, surface);
+				calculateSubpos(surface);
+			}
+		}
+		
+		// Update all surface buffers
+		for(WLCPopup popup : popups) {
+			WaylandCraft.LOGGER.info("POPUP");
+			WLCSurface root = popup.getSurfaceTree();
 			for(WLCSurface surface = root; surface != null; surface = surface.getNextChild()) {
 				updateSurfaceData(instance, surface);
 				calculateSubpos(surface);
@@ -172,6 +250,10 @@ public class WaylandCraftBridge {
 	
 	public WLCToplevel[] getToplevels() {
 		return toplevels.toArray(new WLCToplevel[toplevels.size()]);
+	}
+	
+	public WLCPopup[] getPopups() {
+		return popups.toArray(new WLCPopup[popups.size()]);
 	}
 	
 	public String getSocket() {
@@ -204,6 +286,15 @@ public class WaylandCraftBridge {
 	private static native long toplevelSurface(long instance, long handle);
 	private static native void updateSurfaceData(long instance, WLCSurface surface);
 	
+	private static native long[] popups(long instance);
+	private static native long popupSurface(long instance, long handle);
+	// Query the parent of a popup
+	// Returned handle is a handle either to a toplevel or another popup
+	private static native long popupParent(long instance, long handle);
+	// Query popup local offset coordinates
+	// Returns two-element list containing x,y
+	private static native int[] popupOffset(long instance, long handle);
+	
 	private static native long[] dmabufs(long instance);
 	
 	// Updates the surface tree given by the root surface
@@ -222,5 +313,6 @@ public class WaylandCraftBridge {
 	
 	private static native void freeSurface(long instance, long handle);
 	private static native void freeToplevel(long instance, long handle);
+	private static native void freePopup(long instance, long handle);
 	
 }

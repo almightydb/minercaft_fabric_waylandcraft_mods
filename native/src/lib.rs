@@ -212,9 +212,13 @@ impl XdgShellHandler for WLCState {
     fn new_popup(
         &mut self,
         surface: PopupSurface,
-        _positioner: PositionerState
+        positioner: PositionerState
     ) {
-        surface.send_configure().expect("Initial popup configure");
+        surface.with_pending_state(|state| {
+            state.geometry = positioner.get_geometry();
+            state.positioner = positioner;
+        });
+        surface.send_configure().expect("popup initial configure");
     }
 
     fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {
@@ -222,10 +226,15 @@ impl XdgShellHandler for WLCState {
 
     fn reposition_request(
         &mut self,
-        _surface: PopupSurface,
-        _positioner: PositionerState,
-        _token: u32
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32
     ) {
+        surface.with_pending_state(|state| {
+            state.geometry = positioner.get_geometry();
+            state.positioner = positioner;
+        });
+        surface.send_repositioned(token);
     }
 }
 
@@ -342,6 +351,28 @@ impl<'a> WaylandCraft<'a> {
 
             with_surface_tree_downward(
                 toplevel_surface,
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |_, data, _| {
+                    let mut attr_guard = data
+                        .cached_state
+                        .get::<SurfaceAttributes>();
+                    let attr = attr_guard
+                        .deref_mut()
+                        .current();
+                    for c in attr.frame_callbacks.drain(..) {
+                        c.done(get_time());
+                    }
+                },
+                |_, _, _| true,
+            );
+        }
+        let popups = self.state.xdg_state.popup_surfaces();
+        for popup in popups {
+            let popup_surface = popup.wl_surface();
+
+            with_surface_tree_downward(
+                popup_surface,
                 (),
                 |_, _, _| TraversalAction::DoChildren(()),
                 |_, data, _| {

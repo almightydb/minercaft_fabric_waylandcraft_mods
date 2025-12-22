@@ -3,7 +3,7 @@ use crate::{WaylandCraft, wlc_init, get_time};
 use crate::egl::{EGLHelper, EGLDisplay};
 use smithay::{
     wayland::{
-        shell::xdg::ToplevelSurface,
+        shell::xdg::{ToplevelSurface, PopupSurface},
         compositor::{
             SurfaceAttributes, BufferAssignment, with_states, SurfaceData,
             with_surface_tree_upward, TraversalAction, SubsurfaceCachedState
@@ -43,6 +43,7 @@ use jni::{
 
 pub(crate) struct BridgeState {
     toplevels: Vec<Box<ToplevelSurface>>,
+    popups: Vec<Box<PopupSurface>>,
     surfaces: Vec<Box<WlSurface>>,
     dmabufs: Vec<Box<WeakDmabuf>>,
 }
@@ -51,6 +52,7 @@ impl BridgeState {
     pub fn new() -> Self {
         BridgeState {
             toplevels: vec![],
+            popups: vec![],
             surfaces: vec![],
             dmabufs: vec![],
         }
@@ -139,6 +141,18 @@ fn insert_get_handle<T>(vec: &mut Vec<Box<T>>, elem: &T) -> jlong
     ((ptr as *mut T) as usize) as jlong
 }
 
+// Get an element and return its handle
+// Element has to be in the list, otherwise this functions panics
+fn get_handle<T>(vec: &Vec<Box<T>>, elem: &T) -> jlong
+    where T: Clone + PartialEq
+{
+    let ptr: &T = vec
+        .iter()
+        .find(|r| ***r == *elem)
+        .unwrap();
+    ((ptr as *const T) as usize) as jlong
+}
+
 // Insert all elements that aren't in the list already
 fn insert_all<T>(vec: &mut Vec<Box<T>>, elems: &[T])
     where T: Clone + PartialEq
@@ -188,6 +202,28 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevels<'l>(
     let toplevels = get_all_handles(&mut instance.bridge.toplevels);
     let array = env.new_long_array(toplevels.len() as jsize).unwrap();
     env.set_long_array_region(&array, 0, &toplevels).unwrap();
+    array.into_raw()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_popups<'l>(
+    env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong
+) -> jarray {
+    let instance = jptr_to_instance(ptr);
+
+    insert_all(
+        &mut instance.bridge.popups,
+        instance.state.xdg_state.popup_surfaces()
+    );
+
+    instance.bridge.popups.retain(|t| t.alive());
+
+    let popups = get_all_handles(&mut instance.bridge.popups);
+    let array = env.new_long_array(popups.len() as jsize).unwrap();
+    env.set_long_array_region(&array, 0, &popups).unwrap();
     array.into_raw()
 }
 
@@ -454,6 +490,11 @@ fn jptr_to_toplevel(ptr: jlong) -> &'static mut ToplevelSurface {
     unsafe { &mut *ptr }
 }
 
+fn jptr_to_popup(ptr: jlong) -> &'static mut PopupSurface {
+    let ptr: *mut PopupSurface = (ptr as usize) as *mut PopupSurface;
+    unsafe { &mut *ptr }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system"
 fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevelSurface<'l>(
@@ -467,6 +508,71 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_toplevelSurface<'l>(
     let surface: &WlSurface = toplevel.wl_surface();
 
     insert_get_handle(&mut instance.bridge.surfaces, surface)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_popupSurface<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+    handle: jlong
+) -> jlong {
+    let instance = jptr_to_instance(ptr);
+    let popup: &mut PopupSurface = jptr_to_popup(handle);
+    let surface: &WlSurface = popup.wl_surface();
+
+    insert_get_handle(&mut instance.bridge.surfaces, surface)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_popupParent<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+    handle: jlong
+) -> jlong {
+    let instance = jptr_to_instance(ptr);
+    let popup: &mut PopupSurface = jptr_to_popup(handle);
+    let parent_surface: Option<WlSurface> = popup.get_parent_surface();
+    if parent_surface.is_none() {
+        return 0;
+    }
+    let parent_surface: WlSurface = parent_surface.unwrap();
+
+    for toplevel in &instance.bridge.toplevels {
+        if *toplevel.wl_surface() == parent_surface {
+            return get_handle(&instance.bridge.toplevels, toplevel);
+        }
+    }
+
+    for popup in &instance.bridge.popups {
+        if *popup.wl_surface() == parent_surface {
+            return get_handle(&instance.bridge.popups, popup);
+        }
+    }
+
+    return 0;
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_popupOffset<'l>(
+    env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+    handle: jlong
+) -> jarray {
+    let _instance = jptr_to_instance(ptr);
+    let _popup: &mut PopupSurface = jptr_to_popup(handle);
+
+    // TODO: Implement this
+    let offset: [jint; 2] = [0, 0];
+
+    let array = env.new_int_array(2).unwrap();
+    env.set_int_array_region(&array, 0, &offset).unwrap();
+    array.into_raw()
 }
 
 fn get_or_create_surface<'l>(
@@ -726,4 +832,16 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_freeToplevel<'l>(
 ) {
     let instance = jptr_to_instance(ptr);
     remove_element(&mut instance.bridge.toplevels, handle);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_freePopup<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+    handle: jlong
+) {
+    let instance = jptr_to_instance(ptr);
+    remove_element(&mut instance.bridge.popups, handle);
 }
