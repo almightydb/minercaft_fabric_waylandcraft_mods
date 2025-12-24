@@ -19,7 +19,7 @@ use smithay::{
     },
     input::{
         pointer::{MotionEvent, ButtonEvent, AxisFrame},
-        keyboard::self,
+        keyboard::{self, XkbConfig},
     },
     utils::{Point, Logical, SERIAL_COUNTER, Size},
     backend::{
@@ -880,6 +880,17 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_keyboardInput<'l>(
         get_time(),
         |_,_,_| keyboard::FilterResult::<()>::Forward
     );
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_keyboardReset<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong
+) {
+    let instance = jptr_to_instance(ptr);
+    instance.state.seat.add_keyboard(XkbConfig::default(), 200, 25).unwrap();
 }
 
 #[unsafe(no_mangle)]
