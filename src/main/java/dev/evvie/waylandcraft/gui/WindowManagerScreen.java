@@ -93,8 +93,6 @@ public class WindowManagerScreen extends Screen {
 				.size(buttonWidth, buttonHeight)
 				.build();
 		
-//		InputConstants.grabOrReleaseMouse(this.minecraft.getWindow().getWindow(), GLFW.GLFW_CURSOR_DISABLED, this.xpos, this.ypos);
-		
 		addRenderableWidget(grabButton);
 		addRenderableWidget(hideButton);
 		addRenderableWidget(resizeButton);
@@ -180,7 +178,7 @@ public class WindowManagerScreen extends Screen {
 			
 			WaylandCraft.LOGGER.info("Changing focus to " + focused);
 			
-			if(focused != null) wlc.bridge.focusSurface(focused.getSurfaceTree());
+			if(focused != null) wlc.bridge.focusSurface(focused);
 			else wlc.bridge.focusSurface(null);
 		}
 		
@@ -252,7 +250,7 @@ public class WindowManagerScreen extends Screen {
 			resizeWidth = Math.clamp(resizeWidth, 0, 1920);
 			resizeHeight = Math.clamp(resizeHeight, 0, 1080);
 			
-			WaylandCraft.LOGGER.info("RESIZE " + resizeWidth + ", " + resizeHeight + " [" + resizeInitialWidth + ", " + resizeInitialHeight + "]");
+//			WaylandCraft.LOGGER.info("RESIZE " + resizeWidth + ", " + resizeHeight + " [" + resizeInitialWidth + ", " + resizeInitialHeight + "]");
 			wlc.bridge.resizeToplevelInteractive(resizeToplevel, resizeWidth, resizeHeight);
 			
 			return;

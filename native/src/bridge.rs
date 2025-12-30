@@ -842,9 +842,11 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_keyboardFocus<'l>(
     handle: jlong
 ) {
     let instance = jptr_to_instance(ptr);
-    let surface: Option<WlSurface> = if handle != 0 {
-        Some(jptr_to_wlsurface(handle).clone())
+    let toplevel: Option<ToplevelSurface> = if handle != 0 {
+        Some(jptr_to_toplevel(handle).clone())
     } else { None };
+
+    let surface = toplevel.as_ref().map(|t| t.wl_surface().clone());
 
     let keyboard = instance.state.seat.get_keyboard().unwrap();
     keyboard.set_focus(
@@ -852,6 +854,20 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_keyboardFocus<'l>(
         surface,
         SERIAL_COUNTER.next_serial()
     );
+
+    instance.state.xdg_state.toplevel_surfaces().iter().for_each(|t| {
+        t.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Activated);
+        });
+    });
+
+    toplevel.map(|t| t.with_pending_state(|state| {
+        state.states.set(xdg_toplevel::State::Activated);
+    }));
+
+    instance.state.xdg_state.toplevel_surfaces().iter().for_each(|t| {
+        t.send_pending_configure();
+    });
 }
 
 #[unsafe(no_mangle)]

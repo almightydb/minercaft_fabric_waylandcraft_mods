@@ -212,6 +212,8 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		// 0x110 is linux BTN_LEFT, see linux/input-event-codes.h
 		bridge.sendButton(0x110 + button, action);
 		
+		if(action == GLFW.GLFW_PRESS && window.backing instanceof WLCToplevel) bridge.focusSurface((WLCToplevel) window.backing);
+		
 		return true;
 	}
 	
@@ -234,6 +236,8 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		// Multiplication by -10 is the inverse transformation from what GLFW does on wayland
 		bridge.sendScroll(0, -scrollY * 10);
 		bridge.sendScroll(1, -scrollX * 10);
+		
+		if(window.backing instanceof WLCToplevel) bridge.focusSurface((WLCToplevel) window.backing);
 		
 		return true;
 	}
@@ -276,10 +280,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			return;
 		}
 		
-		WLCSurface surface = hitResult.target.backing.getSurfaceTree();
-		if(!surface.isAlive()) return;
-		
-		bridge.focusSurface(surface);
+		if(hitResult.target.backing instanceof WLCToplevel) bridge.focusSurface((WLCToplevel) hitResult.target.backing);
 		keyboardCaptured = !keyboardCaptured;
 	}
 	

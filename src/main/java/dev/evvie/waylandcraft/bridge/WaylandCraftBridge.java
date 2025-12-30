@@ -299,10 +299,10 @@ public class WaylandCraftBridge {
 		pointerAxis(instance, axis, value);
 	}
 	
-	public void focusSurface(@Nullable WLCSurface surface) {
+	public void focusSurface(@Nullable WLCToplevel toplevel) {
 		long handle = 0;
-		if(surface != null) {
-			handle = surface.getHandle();
+		if(toplevel != null) {
+			handle = toplevel.getHandle();
 		}
 		keyboardFocus(instance, handle);
 	}
@@ -320,7 +320,6 @@ public class WaylandCraftBridge {
 	}
 	
 	public void resizeToplevelInteractive(WLCToplevel toplevel, int width, int height) {
-		System.out.println("resizeToplevelInteractive " + width + ", " + height);
 		toplevelResizeInt(toplevel.getHandle(), width, height, false);
 	}
 	
