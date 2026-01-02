@@ -131,7 +131,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			if(grabbedWindow != null) anchorToCamera(grabbedWindow, context.camera());
 			
 			// Make sure the toplevels are focused in their respective order and being refocused when a toplevel disappears
-			if(!(Minecraft.getInstance().screen instanceof WindowManagerScreen) && !keyboardCaptured) {
+			if(!(Minecraft.getInstance().screen instanceof WindowManagerScreen)) {
 				bridge.focusSurface(bridge.getMostRecentFocus());
 			}
 			
