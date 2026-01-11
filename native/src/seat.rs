@@ -15,13 +15,21 @@ use smithay::{
                 wl_keyboard::{self, WlKeyboard, KeymapFormat, KeyState},
             },
             DisplayHandle, Client, GlobalDispatch, Dispatch, New, DataInit,
-            Resource,
+            Resource, WEnum,
         },
         wayland_protocols::wp::relative_pointer::zv1::server::{
             zwp_relative_pointer_manager_v1 as zwp_rpm,
             zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1,
             zwp_relative_pointer_v1 as zwp_relpointer,
             zwp_relative_pointer_v1::ZwpRelativePointerV1,
+        },
+        wayland_protocols::wp::pointer_constraints::zv1::server::{
+            zwp_pointer_constraints_v1 as zwp_constraints,
+            zwp_pointer_constraints_v1::ZwpPointerConstraintsV1,
+            zwp_locked_pointer_v1 as zwp_locked,
+            zwp_locked_pointer_v1::ZwpLockedPointerV1,
+            zwp_confined_pointer_v1 as zwp_confined,
+            zwp_confined_pointer_v1::ZwpConfinedPointerV1,
         },
     },
 };
@@ -41,9 +49,18 @@ pub struct WLCPointerData {
     focus: Option<WlSurface>,
     // Relative pointer object, if any
     relative_pointer: Option<ZwpRelativePointerV1>,
+    // Pointer position lock
+    lock: Option<WLCPointerLock>,
+    // Pointer confined lock
+    confined: Option<WLCPointerLock>,
 }
 
 type WLCPointer = Arc<Mutex<WLCPointerData>>;
+
+pub struct WLCPointerLock {
+    surface: WlSurface,
+    oneshot: bool,
+}
 
 pub struct WLCKeyboardData {
     // WlSurface holding keyboard focus
@@ -53,8 +70,8 @@ pub struct WLCKeyboardData {
 
 type WLCKeyboard = Arc<Mutex<WLCKeyboardData>>;
 
-fn with_pointer_data<F>(pointer: &WlPointer, f: F)
-    where F: FnOnce(&mut WLCPointerData)
+fn with_pointer_data<F, R>(pointer: &WlPointer, f: F) -> R
+    where F: FnOnce(&mut WLCPointerData) -> R
 {
     let mut guard = pointer
         .data::<WLCPointer>()
@@ -62,7 +79,7 @@ fn with_pointer_data<F>(pointer: &WlPointer, f: F)
         .lock()
         .unwrap();
     let data = guard.deref_mut();
-    f(data);
+    f(data)
 }
 
 fn with_keyboard_data<F>(keyboard: &WlKeyboard, f: F)
@@ -114,6 +131,7 @@ impl WLCSeatState {
     pub fn create_globals(&self, disp: &DisplayHandle) {
         disp.create_global::<WLCState, WlSeat, ()>(10, ());
         disp.create_global::<WLCState, ZwpRelativePointerManagerV1, ()>(1, ());
+        disp.create_global::<WLCState, ZwpPointerConstraintsV1, ()>(1, ());
     }
 
     fn pointer_frame(&self, pointer: &WlPointer) {
@@ -341,6 +359,8 @@ impl Dispatch<WlSeat, ()> for WLCState {
                 let pointer_data = WLCPointerData {
                     focus: None,
                     relative_pointer: None,
+                    lock: None,
+                    confined: None,
                 };
                 let pointer_data = Arc::new(Mutex::new(pointer_data));
 
@@ -495,6 +515,165 @@ impl Dispatch<ZwpRelativePointerV1, ()> for WLCState {
             if data.relative_pointer == Some(relpointer_resource.clone()) {
                 data.relative_pointer = None;
             }
+        });
+    }
+}
+
+impl GlobalDispatch<ZwpPointerConstraintsV1, ()> for WLCState {
+    fn bind(
+        _state: &mut Self,
+        _handle: &DisplayHandle,
+        _client: &Client,
+        resource: New<ZwpPointerConstraintsV1>,
+        _data: &(),
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        data_init.init(resource, ());
+    }
+}
+
+fn has_existing_constraint(
+    state: &mut WLCState,
+    pointer: &WlPointer,
+    surface: &WlSurface
+) -> bool {
+    let mut err = false;
+    with_pointer_data(&pointer, |data| {
+        if data.lock.is_some() || data.confined.is_some() {
+            err = true;
+        }
+    });
+    state.seat.for_all_pointers(|_pointer, data| {
+        if let Some(lock) = &data.lock && lock.surface == *surface {
+            err = true;
+        }
+        if let Some(lock) = &data.confined && lock.surface == *surface {
+            err = true;
+        }
+    });
+    err
+}
+
+impl Dispatch<ZwpPointerConstraintsV1, ()> for WLCState {
+    fn request(
+        state: &mut Self,
+        _client: &Client,
+        resource: &ZwpPointerConstraintsV1,
+        request: zwp_constraints::Request,
+        _data: &(),
+        _disp: &DisplayHandle,
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        match request {
+            zwp_constraints::Request::Destroy => {},
+            zwp_constraints::Request::LockPointer {
+                id, surface, pointer, lifetime, ..
+            } => {
+                if has_existing_constraint(state, &pointer, &surface) {
+                    resource.post_error(
+                        zwp_constraints::Error::AlreadyConstrained,
+                        "Pointer or surface already has attached constraint"
+                    );
+                    return;
+                }
+
+                let oneshot = lifetime == WEnum::Value(
+                    zwp_constraints::Lifetime::Oneshot
+                );
+
+                with_pointer_data(&pointer, |data| {
+                    data.lock = Some(WLCPointerLock {
+                        surface: surface.clone(),
+                        oneshot,
+                    });
+                });
+
+                let _lock_resource = data_init.init(id, pointer.clone());
+            },
+            zwp_constraints::Request::ConfinePointer {
+                id, surface, pointer, lifetime, ..
+            } => {
+                if has_existing_constraint(state, &pointer, &surface) {
+                    resource.post_error(
+                        zwp_constraints::Error::AlreadyConstrained,
+                        "Pointer or surface already has attached constraint"
+                    );
+                    return;
+                }
+
+                let oneshot = lifetime == WEnum::Value(
+                    zwp_constraints::Lifetime::Oneshot
+                );
+
+                with_pointer_data(&pointer, |data| {
+                    data.confined = Some(WLCPointerLock {
+                        surface: surface.clone(),
+                        oneshot,
+                    });
+                });
+
+                let _confine_resource = data_init.init(id, pointer.clone());
+            },
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Dispatch<ZwpLockedPointerV1, WlPointer> for WLCState {
+    fn request(
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &ZwpLockedPointerV1,
+        request: zwp_locked::Request,
+        _data: &WlPointer,
+        _disp: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
+    ) {
+        match request {
+            zwp_locked::Request::Destroy => {},
+            zwp_locked::Request::SetCursorPositionHint { .. } => {},
+            zwp_locked::Request::SetRegion { .. } => {},
+            _ => unreachable!(),
+        }
+    }
+
+    fn destroyed(
+        _state: &mut Self,
+        _client: ClientId,
+        _locked_resource: &ZwpLockedPointerV1,
+        pointer: &WlPointer,
+    ) {
+        with_pointer_data(pointer, |data| {
+            data.lock = None;
+        });
+    }
+}
+
+impl Dispatch<ZwpConfinedPointerV1, WlPointer> for WLCState {
+    fn request(
+        _state: &mut Self,
+        _client: &Client,
+        _resource: &ZwpConfinedPointerV1,
+        request: zwp_confined::Request,
+        _data: &WlPointer,
+        _disp: &DisplayHandle,
+        _data_init: &mut DataInit<'_, Self>,
+    ) {
+        match request {
+            zwp_confined::Request::Destroy => {},
+            zwp_confined::Request::SetRegion { .. } => {},
+            _ => unreachable!(),
+        }
+    }
+
+    fn destroyed(
+        _state: &mut Self,
+        _client: ClientId,
+        _confined_resource: &ZwpConfinedPointerV1,
+        pointer: &WlPointer,
+    ) {
+        with_pointer_data(pointer, |data| {
+            data.confined = None;
         });
     }
 }
