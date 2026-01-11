@@ -21,14 +21,12 @@ public class WindowFramebuffer {
 	
 	public final WLCAbstractWindow window;
 	
-	private int fbo;
 	private int tex;
-	private int depth_stencil_rbo;
 	
-	private int width;
-	private int height;
-	private int xoff;
-	private int yoff;
+	private int width = -1;
+	private int height = -1;
+	private int xoff = -1;
+	private int yoff = -1;
 	
 	private WindowFramebuffer(WLCAbstractWindow window) {
 		this.window = window;
@@ -55,8 +53,8 @@ public class WindowFramebuffer {
 		for(WLCSurface surface = window.getSurfaceTree(); surface != null; surface = surface.getNextChild()) {
 			int sMinX = surface.xSubpos;
 			int sMinY = surface.ySubpos;
-			int sMaxX = surface.xSubpos + surface.width();
-			int sMaxY = surface.ySubpos + surface.height();
+			int sMaxX = sMinX + surface.width();
+			int sMaxY = sMinY + surface.height();
 			
 			if(sMinX < minX) minX = sMinX;
 			if(sMinY < minY) minY = sMinY;
@@ -71,7 +69,7 @@ public class WindowFramebuffer {
 	}
 	
 	private void render() {
-		fbo = GL33.glGenFramebuffers();
+		int fbo = GL33.glGenFramebuffers();
 		GL33.glBindFramebuffer(GL33.GL_FRAMEBUFFER, fbo);
 		
 		tex = GL33.glGenTextures();
@@ -79,14 +77,20 @@ public class WindowFramebuffer {
 		GL33.nglTexImage2D(GL33.GL_TEXTURE_2D, 0, GL33.GL_RGBA, width, height, 0, GL33.GL_RGBA, GL33.GL_UNSIGNED_BYTE, 0);
 		GL33.glTexParameteri(GL33.GL_TEXTURE_2D, GL33.GL_TEXTURE_MIN_FILTER, GL33.GL_NEAREST);
 		GL33.glTexParameteri(GL33.GL_TEXTURE_2D, GL33.GL_TEXTURE_MAG_FILTER, GL33.GL_NEAREST);
-		GL33.glFramebufferTexture2D(GL33.GL_FRAMEBUFFER, GL33.GL_COLOR_ATTACHMENT0, GL33.GL_TEXTURE_2D, tex, 0);
 		GL33.glBindTexture(GL33.GL_TEXTURE_2D, 0);
 		
-		depth_stencil_rbo = GL33.glGenRenderbuffers();
+		GL33.glFramebufferTexture2D(GL33.GL_FRAMEBUFFER, GL33.GL_COLOR_ATTACHMENT0, GL33.GL_TEXTURE_2D, tex, 0);
+		
+		int depth_stencil_rbo = GL33.glGenRenderbuffers();
 		GL33.glBindRenderbuffer(GL33.GL_RENDERBUFFER, depth_stencil_rbo);
 		GL33.glRenderbufferStorage(GL33.GL_RENDERBUFFER, GL33.GL_DEPTH24_STENCIL8, width, height);
-		GL33.glFramebufferRenderbuffer(GL33.GL_FRAMEBUFFER, GL33.GL_DEPTH_STENCIL_ATTACHMENT, GL33.GL_RENDERBUFFER, depth_stencil_rbo);
 		GL33.glBindRenderbuffer(GL33.GL_RENDERBUFFER, 0);
+		
+		GL33.glFramebufferRenderbuffer(GL33.GL_FRAMEBUFFER, GL33.GL_DEPTH_STENCIL_ATTACHMENT, GL33.GL_RENDERBUFFER, depth_stencil_rbo);
+		
+		if(GL33.glCheckFramebufferStatus(GL33.GL_FRAMEBUFFER) != GL33.GL_FRAMEBUFFER_COMPLETE) {
+			WaylandCraft.LOGGER.error("Failed to create framebuffer!");
+		}
 		
 		GL33.glViewport(0, 0, width, height);
 		GL33.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -107,11 +111,19 @@ public class WindowFramebuffer {
 		}
 		
 		GL33.glBindVertexArray(vaoRestore);
+		GL33.glDeleteVertexArrays(vao);
 		
 		GL33.glDisable(GL33.GL_BLEND);
 		GL33.glDepthFunc(GL33.GL_LEQUAL);
 		
 		Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+		
+		GL33.glDeleteRenderbuffers(depth_stencil_rbo);
+		GL33.glDeleteFramebuffers(fbo);
+	}
+	
+	public void freeTexture() {
+		GL33.glDeleteTextures(tex);
 	}
 	
 	private void renderSurface(WLCSurface surface, float x, float y) {
@@ -192,12 +204,6 @@ public class WindowFramebuffer {
 	
 	public int getTexture() {
 		return tex;
-	}
-	
-	public void destroy() {
-		GL33.glDeleteRenderbuffers(depth_stencil_rbo);
-		GL33.glDeleteFramebuffers(fbo);
-		GL33.glDeleteTextures(tex);
 	}
 	
 	private static void ensureShaderCompiled() {

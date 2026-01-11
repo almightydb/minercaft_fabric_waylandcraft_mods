@@ -245,9 +245,7 @@ public class WaylandCraftBridge {
 		
 		// Render windows
 		for(WLCAbstractWindow window : allWindows) {
-			if(window.framebuffer != null) {
-				window.framebuffer.destroy();
-			}
+			if(window.framebuffer != null) window.framebuffer.freeTexture();
 			window.framebuffer = WindowFramebuffer.renderWindow(window);
 		}
 		
