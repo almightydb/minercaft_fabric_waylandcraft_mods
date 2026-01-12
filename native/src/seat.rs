@@ -47,8 +47,8 @@ pub struct WLCPointerData {
     // WlSurface holding pointer focus
     // This surface has to be of the same client as the WlPointer
     focus: Option<WlSurface>,
-    // Relative pointer object, if any
-    relative_pointer: Option<ZwpRelativePointerV1>,
+    // Relative pointer objects
+    relative_pointers: Vec<ZwpRelativePointerV1>,
     // Pointer position lock
     lock: Option<WLCPointerLock>,
     // Pointer confined lock
@@ -187,7 +187,7 @@ impl WLCSeatState {
     pub fn pointer_relative_motion(&self, dx: f64, dy: f64) {
         self.for_all_pointers(|_pointer, data| {
             if !data.focus.is_some() { return }
-            if let Some(relative_pointer) = &data.relative_pointer {
+            for relative_pointer in &data.relative_pointers {
                 let time = (get_time() as u64) * 1000; // ms to µs
                 relative_pointer.relative_motion(
                     (time >> 32) as u32, // utime_hi
@@ -358,7 +358,7 @@ impl Dispatch<WlSeat, ()> for WLCState {
             wl_seat::Request::GetPointer { id } => {
                 let pointer_data = WLCPointerData {
                     focus: None,
-                    relative_pointer: None,
+                    relative_pointers: vec![],
                     lock: None,
                     confined: None,
                 };
@@ -481,7 +481,7 @@ impl Dispatch<ZwpRelativePointerManagerV1, ()> for WLCState {
                 let relative_pointer = data_init.init(id, ());
 
                 with_pointer_data(&pointer, |data| {
-                    data.relative_pointer = Some(relative_pointer);
+                    data.relative_pointers.push(relative_pointer);
                 });
             },
             _ => unreachable!(),
@@ -512,9 +512,7 @@ impl Dispatch<ZwpRelativePointerV1, ()> for WLCState {
         _data: &(),
     ) {
         state.seat.for_all_pointers(|_pointer, data| {
-            if data.relative_pointer == Some(relpointer_resource.clone()) {
-                data.relative_pointer = None;
-            }
+            data.relative_pointers.retain(|r| r != relpointer_resource);
         });
     }
 }
