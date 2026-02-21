@@ -4,9 +4,7 @@ import org.joml.Matrix3d;
 import org.joml.Vector3d;
 
 import dev.evvie.waylandcraft.bridge.WLCAbstractWindow;
-import dev.evvie.waylandcraft.bridge.WLCPopup;
 import dev.evvie.waylandcraft.bridge.WLCSurface;
-import dev.evvie.waylandcraft.bridge.WLCToplevel;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
@@ -29,16 +27,13 @@ public class WindowDisplay {
 	private int width;
 	private int height;
 	
-	public WindowDisplay(WLCToplevel toplevel) {
-		this.window = toplevel;
+	public WindowDisplay(WLCAbstractWindow window) {
+		this.window = window;
+		this.updateGeometry();
 	}
 	
-	public WindowDisplay(WLCPopup popup) {
-		this.window = popup;
-	}
-	
-	public boolean isAlive() {
-		return window.isAlive();
+	public boolean isValid() {
+		return window.isAlive() && window.framebuffer.isValid();
 	}
 	
 	public void rotate(Vec3 normal, Vec3 down) {
@@ -82,10 +77,9 @@ public class WindowDisplay {
 		pivot = pos.add(localX().scale(width/2)).add(localY().scale(height/2));
 	}
 	
-	private void updateGeometry() {
-		WLCSurface root = window.getSurfaceTree();
-		width = root.width();
-		height = root.height();
+	public void updateGeometry() {
+		width = window.geometry.width();
+		height = window.geometry.height();
 	}
 	
 	public void render(WorldRenderContext ctx) {

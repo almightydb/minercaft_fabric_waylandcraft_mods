@@ -89,18 +89,19 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 				boolean toplevelHasWindow = hasDisplayFor(toplevel);
 				boolean popupHasWindow = hasDisplayFor(popup);
 				if(toplevelHasWindow && !popupHasWindow) {
-					displays.add(new WindowDisplay(popup));
+					getOrCreateDisplay(popup);
 				}
 				else if(!toplevelHasWindow && popupHasWindow) {
 					displays.removeIf((w) -> w.window == popup);
 				}
 			}
 			
+			displays.removeIf((d) -> !d.isValid());
+			displays.forEach((d) -> d.updateGeometry());
+			
 			for(WLCPopup popup : bridge.getPopups()) {
 				anchorToParent(popup);
 			}
-			
-			displays.removeIf((w) -> !w.isAlive());
 			
 			// Hide all windows that were minimized and unset minimize requested state
 			displays.removeIf((w) -> w.window instanceof WLCToplevel && ((WLCToplevel) w.window).requests.minimize);
@@ -154,7 +155,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 				toplevel.requests.fullscreen = toplevel.requests.unfullscreen = false;
 			}
 			
-			if(grabbedDisplay != null && !grabbedDisplay.isAlive()) grabbedDisplay = null;
+			if(grabbedDisplay != null && !grabbedDisplay.isValid()) grabbedDisplay = null;
 			if(grabbedDisplay != null) anchorToCamera(grabbedDisplay, context.camera());
 			
 			boolean inWMScreen = Minecraft.getInstance().screen instanceof WindowManagerScreen;
@@ -275,14 +276,14 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		}
 	}
 	
-	public WindowDisplay getOrCreateDisplay(WLCToplevel toplevel) {
-		WindowDisplay window = displays.stream().filter((w) -> w.window == toplevel).findAny().orElse(null);
-		if(window != null) return window;
+	public WindowDisplay getOrCreateDisplay(WLCAbstractWindow window) {
+		WindowDisplay display = displays.stream().filter((w) -> w.window == window).findAny().orElse(null);
+		if(display != null) return display;
 		
-		window = new WindowDisplay(toplevel);
-		displays.add(window);
+		display = new WindowDisplay(window);
+		displays.add(display);
 		
-		return window;
+		return display;
 	}
 	
 	public boolean hasDisplayFor(WLCAbstractWindow window) {
@@ -300,7 +301,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		if(hitResult == null) return false;
 		
 		WindowDisplay display = hitResult.target;
-		if(!display.isAlive()) {
+		if(!display.isValid()) {
 			hitResult = null;
 			return false;
 		}
@@ -350,7 +351,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		if(hitResult == null) return false;
 		
 		WindowDisplay window = hitResult.target;
-		if(!window.isAlive()) {
+		if(!window.isValid()) {
 			hitResult = null;
 			return false;
 		}
@@ -484,7 +485,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			Vec3 coords = hitResult.surfaceLocal;
 			WindowDisplay w = hitResult.target;
 			
-			if(!w.isAlive()) {
+			if(!w.isValid()) {
 				hitResult = null;
 				bridge.sendMotionOutside();
 				return;

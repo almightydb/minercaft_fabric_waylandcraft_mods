@@ -211,6 +211,10 @@ public class WindowFramebuffer {
 		return tex;
 	}
 	
+	public boolean isValid() {
+		return width > 0 && height > 0;
+	}
+	
 	private static void ensureShaderCompiled() {
 		if(SHADER == -1) {
 			try {

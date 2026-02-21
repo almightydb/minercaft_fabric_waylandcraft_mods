@@ -34,6 +34,9 @@ public class GameRendererMixin {
 		DisplayHitResult windowHit = null;
 		
 		for(WindowDisplay window : WaylandCraft.instance.displays) {
+			if(!window.isValid()) continue;
+			window.updateGeometry();
+			
 			DisplayHitResult h = window.intersect(pos, dir);
 			if(h == null) continue;
 			
