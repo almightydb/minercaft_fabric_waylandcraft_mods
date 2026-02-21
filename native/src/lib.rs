@@ -52,9 +52,6 @@ use smithay::{
         },
         drm::DrmNode,
     },
-    input::{
-        SeatState, SeatHandler,
-    },
     utils::Serial,
     delegate_compositor, delegate_shm, delegate_xdg_shell, delegate_viewporter,
     delegate_single_pixel_buffer, delegate_dmabuf
@@ -196,17 +193,6 @@ impl DmabufHandler for WLCState {
     ) {
         println!("DMABUF ATTACH: {:?}", dmabuf);
         let _ = notifier.successful::<WLCState>();
-    }
-}
-
-// Dummy SeatHandler impl neeeded for XdgPopup Dispatch for delegate_xdg_shell
-impl SeatHandler for WLCState {
-    type KeyboardFocus = WlSurface;
-    type PointerFocus = WlSurface;
-    type TouchFocus = WlSurface;
-
-    fn seat_state(&mut self) -> &mut SeatState<Self> {
-        panic!("seat_state was called on dummy SeatHandler impl")
     }
 }
 

@@ -4,13 +4,12 @@ use crate::egl::{EGLHelper, EGLDisplay};
 use smithay::{
     wayland::{
         shell::xdg::{
-            ToplevelSurface, PopupSurface, XDG_POPUP_ROLE,
-            XdgPopupSurfaceData, SurfaceCachedState, XdgToplevelSurfaceData
+            ToplevelSurface, PopupSurface, SurfaceCachedState,
+            XdgToplevelSurfaceData
         },
         compositor::{
             SurfaceAttributes, BufferAssignment, with_states, SurfaceData,
-            with_surface_tree_upward, TraversalAction, SubsurfaceCachedState,
-            get_role
+            with_surface_tree_upward, TraversalAction, SubsurfaceCachedState
         },
         shm::{self, with_buffer_contents},
         viewporter::{ViewportCachedState, ensure_viewport_valid},
@@ -708,26 +707,18 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_popupOffset<'l>(
     handle: jlong
 ) -> jarray {
     let popup: &mut PopupSurface = jptr_to_popup(handle);
-    let surface = popup.wl_surface();
-
     let mut offset: [jint; 2] = [0, 0];
 
-    if get_role(surface) == Some(XDG_POPUP_ROLE) {
-        with_states(surface, |states| {
-            let attr_guard = states
-                .data_map
-                .get::<XdgPopupSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap();
-            let position = attr_guard
-                .current
-                .geometry
-                .loc;
-            offset[0] = position.x;
-            offset[1] = position.y;
-        });
-    }
+    popup.with_cached_state(|state| {
+        let position = state
+            .last_acked
+            .map(|c| c.state.geometry.loc);
+
+        if let Some(pos) = position {
+            offset[0] = pos.x;
+            offset[1] = pos.y;
+        }
+    });
 
     let array = env.new_int_array(2).unwrap();
     env.set_int_array_region(&array, 0, &offset).unwrap();
@@ -1074,10 +1065,11 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_fullscreened<'l>(
 
     let mut handles: Vec<jlong> = vec![];
     for toplevel in instance.state.xdg_state.toplevel_surfaces() {
-        let fullscreen = toplevel
-            .current_state()
-            .states
-            .contains(xdg_toplevel::State::Fullscreen);
+        let fullscreen = toplevel.with_committed_state(|state| {
+            state
+                .map(|s| s.states.contains(xdg_toplevel::State::Fullscreen))
+                .unwrap_or(false)
+        });
         if !fullscreen { continue; }
 
         let handle = insert_get_handle(
