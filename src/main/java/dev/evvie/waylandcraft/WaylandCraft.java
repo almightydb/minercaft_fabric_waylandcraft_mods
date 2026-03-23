@@ -1,6 +1,7 @@
 package dev.evvie.waylandcraft;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.stream.Stream;
 
 import org.jetbrains.annotations.Nullable;
@@ -75,6 +76,8 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	public DisplayHitResult hoveredDisplay = null;
 	
 	public KeyboardCaptureMode keyboardCaptureMode = KeyboardCaptureMode.NONE;
+	
+	public PointerCapture pointerCapture = null;
 	
 	@Override
 	public void onInitialize() {
@@ -174,6 +177,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		
 		keyboardCaptureMode = KeyboardCaptureMode.NONE;
 		bridge.deactivateKeyboard();
+		disablePointerCapture();
 	}
 	
 	public void onClientTick(Minecraft minecraft) {
@@ -278,7 +282,26 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 		return getDisplay(window) != null;
 	}
 	
+	public void disablePointerCapture() {
+		if(pointerCapture == null) return;
+		bridge.unlockPointer();
+		pointerCapture = null;
+	}
+	
 	private void processPointerMotion(Camera camera) {
+		if(pointerCapture != null) {
+			if(!pointerCapture.surface.isAlive()) {
+				pointerCapture = null;
+				return;
+			}
+			
+			if(!bridge.maybeLockPointer(pointerCapture.surface)) {
+				disablePointerCapture();
+			}
+			
+			return;
+		}
+		
 		// Reset hovered display and pick block override
 		this.hoveredDisplay = null;
 		this.overridePickBlock = false;
@@ -337,6 +360,10 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			Vec3 rel = hoveredDisplay.surfaceLocalRelative;
 			
 			bridge.sendMotionRefocus(surface, rel.x, rel.y);
+			
+			if(keyboardCaptureMode != KeyboardCaptureMode.NONE && bridge.maybeLockPointer(surface)) {
+				pointerCapture = new PointerCapture(surface, rel.x, rel.y);
+			}
 		}
 		else {
 			bridge.sendMotionOutside();
@@ -347,6 +374,22 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	 * Returns true when the mouse button action has been consumed
 	 */
 	public boolean onButtonPress(long windowHandle, int button, int action, int modifiers) {
+		if(pointerCapture != null) {
+			if(action == 1 && !pointerCapture.pressedButtons.contains(button)) {
+				bridge.sendButton(0x110 + button, 1);
+				pointerCapture.pressedButtons.add(button);
+			}
+			else if(action == 0 && pointerCapture.pressedButtons.contains(button)) {
+				bridge.sendButton(0x110 + button, 0);
+				pointerCapture.pressedButtons.remove(button);
+			}
+			else if(action == 0) {
+				// Forward release to minecraft if it wasn't part of this pointer capture
+				return false;
+			}
+			return true;
+		}
+		
 		if(action == 0 && pointerGrabs.isGrabActive(button)) {
 			pointerGrabs.release(button);
 			return true;
@@ -371,8 +414,18 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	 * Returns true when the mouse move has been consumed
 	 */
 	public boolean onMouseTurn(double dx, double dy) {
-		/*
+		if(pointerCapture == null) return false;
+		
 		bridge.sendRelativeMotion(dx, dy);
+		
+		// Workaround for xwayland-satellite issues, usually shouldn't be done
+		// as it is technically against protocol and so might cause issues but
+		// otherwise relative motion seems to not work.
+//		bridge.sendMotion(pointerCapture.x += dx, pointerCapture.y += dy);
+		
+		return true;
+		
+		/*
 		LocalPlayer player = Minecraft.getInstance().player;
 		
 		WindowDisplay display = displays.stream().filter((w) -> w.window == keyboardCapture).findAny().orElse(null);
@@ -386,10 +439,7 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 			player.setYRot(yaw);
 			player.setXRot(pitch);
 		}
-		
-		return true;
 		*/
-		return false;
 	}
 	
 	/* Handle mouse scroll input
@@ -472,6 +522,24 @@ public class WaylandCraft implements ModInitializer, ClientModInitializer {
 	public static enum KeyboardCaptureMode {
 		
 		NONE, CAPTURE, HARD_CAPTURE;
+		
+	}
+	
+	public static class PointerCapture {
+		
+		public final WLCSurface surface;
+		
+		// Pointer capture entry surface-local coordinates
+		public double x;
+		public double y;
+		
+		public HashSet<Integer> pressedButtons = new HashSet<Integer>();
+		
+		public PointerCapture(WLCSurface surface, double x, double y) {
+			this.surface = surface;
+			this.x = x;
+			this.y = y;
+		}
 		
 	}
 	
