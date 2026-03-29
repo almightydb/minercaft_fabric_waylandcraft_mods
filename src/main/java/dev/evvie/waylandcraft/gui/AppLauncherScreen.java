@@ -14,11 +14,18 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FastColor;
 
 public class AppLauncherScreen extends Screen {
 	
 	private WaylandCraft wlc;
+	private static final ResourceLocation SLOT_THINGY = new ResourceLocation(WaylandCraft.MOD_ID, "textures/gui/slot_thingy.png");
+	private static final ResourceLocation SLOT_THINGY_SELECTED = new ResourceLocation(WaylandCraft.MOD_ID, "textures/gui/slot_thingy_selected_overlay.png");
+	private int slotWidth = 200;
+	private int slotHeight = 32;
+	private int slotGap = 4;
+	private int elementHeight = slotHeight + slotGap;
 	
 	public AppLauncherScreen(WaylandCraft wlc) {
 		super(Component.literal("App Launcher"));
@@ -28,30 +35,15 @@ public class AppLauncherScreen extends Screen {
 	
 	@Override
 	protected void init() {
-		int margin = 20;
-		int topMargin = 40;
-		int contentWidth = width - margin * 2;
-		int contentHeight = height - topMargin - margin;
-		
-		int elementSize = 64;
-		int gapSize = 16;
-		int gridSize = elementSize + gapSize;
-		
-		int cols = contentWidth / gridSize;
-		int visibleRows = contentHeight / gridSize;
-		
-		int gridX = (width - cols * elementSize - (cols - 1) * gapSize) / 2;
-		
 		List<DesktopEntry> entries = wlc.xdgManager.entries();
 		Random random = new Random();
-		for(int i = 0; i < 10; i++) {
+		
+		int count = 4;
+		for(int i = 0; i < count; i++) {
 			DesktopEntry entry = null;
 			while(!(entry != null && entry.visible)) entry = entries.get(random.nextInt(entries.size()));
 			
-			int row = i / cols;
-			int col = i % cols;
-			
-			this.addRenderableWidget(new AppWidget(entry, gridX + col * gridSize, topMargin + row * gridSize, elementSize, elementSize));
+			this.addRenderableWidget(new AppWidget(entry, width / 2 - slotWidth / 2, height / 2 - (count * elementHeight - slotGap) / 2 + i * elementHeight, slotWidth, slotHeight));
 		}
 	}
 	
@@ -77,22 +69,22 @@ public class AppLauncherScreen extends Screen {
 		
 		@Override
 		protected void renderWidget(GuiGraphics context, int mouseX, int mouseY, float partialTicks) {
-			String text = getTitle(entry);
-			int textWidth = font.width(text);
-			int textOffset = Math.max(0, width / 2 - textWidth / 2);
-			int iconSize = Math.min(height - font.lineHeight - 4, width - 4);
-			int iconOffset = (width - 4) / 2 - iconSize / 2;
+			boolean selected = isHoveredOrFocused();
 			
-			int color = FastColor.ARGB32.color(128, 25, 25, 25);
-			if(isHoveredOrFocused()) {
-				color = FastColor.ARGB32.color(255, 25, 25, 25);
-			}
-			context.fill(getX(), getY(), getX() + getWidth(), getY() + getHeight(), color);
+			RenderUtils.blit(context, SLOT_THINGY, getX(), getY(), getWidth(), getHeight());
+			if(selected) RenderUtils.blit(context, SLOT_THINGY_SELECTED, getX() - 1, getY() - 1, getWidth() + 2, getHeight() + 2);
 			
-			context.enableScissor(getX(), getY(), getX() + getWidth(), getY() + getHeight());
-			context.drawString(font, text, getX() + textOffset, getY() + getHeight() - font.lineHeight - 2, Color.white.getRGB());
-			if(entry.icon != null) RenderUtils.blit(context, entry.icon, getX() + iconOffset + 2, getY() + 2, iconSize, iconSize);
+			int iconSize = entry.icon != null ? getHeight() - 10 : 0;
+			
+			context.enableScissor(getX() + 4, getY() + 4, getX() + getWidth() - 4, getY() + getHeight() - 4);
+			if(entry.icon != null) RenderUtils.blit(context, entry.icon, getX() + 5, getY() + 5, iconSize, iconSize);
+			context.drawString(font, getTitle(entry), getX() + 5 + iconSize + 5, getY() + getHeight() / 2 - font.lineHeight / 2, Color.white.getRGB());
 			context.disableScissor();
+			
+			if(selected) {
+				context.renderOutline(getX() - 1, getY() - 1, getWidth() + 2, getHeight() + 2, Color.white.getRGB());
+				context.fill(getX() + 4, getY() + 4, getX() + getWidth() - 4, getY() + getHeight() - 4, 1, FastColor.ARGB32.color(128, Color.black.getRGB()));
+			}
 		}
 		
 		@Override
