@@ -40,7 +40,7 @@ public class XDGDesktopManager {
 		RawDesktopEntry[] rawEntries = wlc.bridge.loadSystemDesktopEntries();
 		ArrayList<DesktopEntry> systemEntries = new ArrayList<DesktopEntry>();
 		for(RawDesktopEntry raw : rawEntries) {
-			systemEntries.add(new DesktopEntry(raw.appId, raw.name, raw.genericName, raw.exec, raw.execTerminal, raw.visible, raw.iconPath));
+			systemEntries.add(new DesktopEntry(raw.appId, raw.name, raw.genericName, raw.exec, raw.execTerminal, raw.comment, raw.keywords, raw.categories, raw.visible, raw.iconPath));
 		}
 		this.systemEntries = systemEntries;
 		

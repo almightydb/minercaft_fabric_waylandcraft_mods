@@ -1558,10 +1558,36 @@ fn raw_desktop_entry_to_java<'l>(
     let generic_name: JString<'l> = to_jstr_opt!(&entry.generic_name);
     let exec: JString<'l> = to_jstr_opt!(&entry.exec);
     let exec_terminal: jboolean = entry.exec_terminal as jboolean;
+    let comment: JString<'l> = to_jstr_opt!(&entry.comment);
     let visible: jboolean = entry.visible as jboolean;
     let icon_path: JString<'l> = to_jstr_opt!(&entry.icon_path);
 
+    let keywords: Vec<JString<'l>> =
+        entry.keywords.iter().map(|k| to_jstr!(k)).collect();
+    let kw_array = env.new_object_array(
+        keywords.len() as jsize,
+        "java/lang/String",
+        JObject::null()
+    ).unwrap();
+    for i in 0..keywords.len() {
+        env.set_object_array_element(&kw_array, i as jsize, &keywords[i])
+            .unwrap();
+    }
+
+    let categories: Vec<JString<'l>> =
+        entry.categories.iter().map(|c| to_jstr!(c)).collect();
+    let cat_array = env.new_object_array(
+        categories.len() as jsize,
+        "java/lang/String",
+        JObject::null()
+    ).unwrap();
+    for i in 0..categories.len() {
+        env.set_object_array_element(&cat_array, i as jsize, &categories[i])
+            .unwrap();
+    }
+
     let str_sig = "Ljava/lang/String;";
+    let str_arr_sig = "[Ljava/lang/String;";
     let mut ctor_sig = String::new();
     ctor_sig += "(";
     ctor_sig += str_sig; // appId
@@ -1569,6 +1595,9 @@ fn raw_desktop_entry_to_java<'l>(
     ctor_sig += str_sig; // genericName
     ctor_sig += str_sig; // exec
     ctor_sig += "Z"; // execTerminal
+    ctor_sig += str_sig; // comment
+    ctor_sig += str_arr_sig; // keywords
+    ctor_sig += str_arr_sig; // categories
     ctor_sig += "Z"; // visible
     ctor_sig += str_sig; // iconPath
     ctor_sig += ")V";
@@ -1579,6 +1608,9 @@ fn raw_desktop_entry_to_java<'l>(
         JValue::Object(&generic_name),
         JValue::Object(&exec),
         JValue::Bool(exec_terminal),
+        JValue::Object(&comment),
+        JValue::Object(&kw_array),
+        JValue::Object(&cat_array),
         JValue::Bool(visible),
         JValue::Object(&icon_path),
     ];

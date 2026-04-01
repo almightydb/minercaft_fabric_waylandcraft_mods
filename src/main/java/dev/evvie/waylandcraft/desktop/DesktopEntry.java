@@ -17,17 +17,23 @@ public class DesktopEntry {
 	public @Nullable String genericName;
 	public @Nullable String exec;
 	public boolean execTerminal;
+	public final String comment;
+	public final String[] keywords;
+	public final String[] categories;
 	public boolean visible;
 	protected String iconPath;
 	private ResourceLocation icon = null;
 	private boolean iconLoaded = false;
 	
-	public DesktopEntry(String appId, String name, String genericName, String exec, boolean execTerminal, boolean visible, String iconPath) {
+	public DesktopEntry(String appId, String name, String genericName, String exec, boolean execTerminal, String comment, String[] keywords, String[] categories, boolean visible, String iconPath) {
 		this.appId = appId;
 		this.name = name;
 		this.genericName = genericName;
 		this.exec = exec;
 		this.execTerminal = execTerminal;
+		this.comment = comment;
+		this.keywords = keywords;
+		this.categories = categories;
 		this.visible = visible;
 		this.icon = null;
 		this.iconPath = iconPath;

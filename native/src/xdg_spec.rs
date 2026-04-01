@@ -19,6 +19,9 @@ pub struct RawDesktopEntry {
     pub generic_name: Option<String>,
     pub exec: Option<String>,
     pub exec_terminal: bool,
+    pub comment: Option<String>,
+    pub keywords: Vec<String>,
+    pub categories: Vec<String>,
     pub visible: bool,
     pub icon_path: Option<String>,
 }
@@ -43,6 +46,20 @@ impl XDGSpecHelper {
             visible = false;
         }
 
+        let keywords = entry
+            .keywords(&self.locales)
+            .unwrap_or(vec![])
+            .iter_mut()
+            .map(|k| k.to_mut().clone())
+            .collect();
+
+        let categories = entry
+            .categories()
+            .unwrap_or(vec![])
+            .iter()
+            .map(|c| (*c).into())
+            .collect();
+
         RawDesktopEntry {
             app_id: entry.id().into(),
             name: entry.name(&self.locales).map(|c| c.into_owned()),
@@ -50,6 +67,9 @@ impl XDGSpecHelper {
                 entry.generic_name(&self.locales).map(|c| c.into_owned()),
             exec: entry.exec().map(|s| s.into()),
             exec_terminal: entry.terminal(),
+            comment: entry.comment(&self.locales).map(|c| c.into_owned()),
+            keywords,
+            categories,
             visible: visible,
             icon_path: icon.map(|p| p.into_os_string().into_string().unwrap()),
         }
