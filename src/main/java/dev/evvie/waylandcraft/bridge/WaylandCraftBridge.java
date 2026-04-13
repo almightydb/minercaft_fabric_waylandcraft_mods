@@ -527,8 +527,12 @@ public class WaylandCraftBridge {
 		return serial[0];
 	}
 	
-	public void cancelDnd() {
-		cancelDnd(instance);
+	public void dndCancel() {
+		dndCancel(instance);
+	}
+	
+	public void dndDrop() {
+		dndDrop(instance);
 	}
 	
 	public void sendDndMotion(WLCSurface surface, double x, double y) {
@@ -664,7 +668,8 @@ public class WaylandCraftBridge {
 	private static native boolean setKeymapFromStr(long instance, String keymap);
 	
 	private static native int[] checkDndRequest(long instance);
-	private static native void cancelDnd(long instance);
+	private static native void dndCancel(long instance);
+	private static native void dndDrop(long instance);
 	private static native void dndMotion(long instance, long surface, double x, double y);
 	
 }

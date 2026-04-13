@@ -1775,13 +1775,24 @@ fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_checkDndRequest<'l>(
 
 #[unsafe(no_mangle)]
 pub extern "system"
-fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_cancelDnd<'l>(
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_dndCancel<'l>(
     _env: JNIEnv<'l>,
     _class: JClass<'l>,
     ptr: jlong,
 ) {
     let instance = jptr_to_instance(ptr);
     instance.state.data.dnd_cancel();
+}
+
+#[unsafe(no_mangle)]
+pub extern "system"
+fn Java_dev_evvie_waylandcraft_bridge_WaylandCraftBridge_dndDrop<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+    ptr: jlong,
+) {
+    let instance = jptr_to_instance(ptr);
+    instance.state.data.dnd_drop();
 }
 
 #[unsafe(no_mangle)]

@@ -59,6 +59,7 @@ type WLCDataDevice = Arc<Mutex<WLCDataDeviceData>>;
 struct WLCDataDeviceData {
     dnd_focus: Option<WlSurface>,
     last_dnd_motion: Option<(i32, i32)>,
+    dnd_offer: Option<WlDataOffer>,
 }
 
 fn with_source_data<F, R>(source: &WlDataSource, f: F) -> R
@@ -158,6 +159,7 @@ impl WLCDataState {
                 Some(_) => (),
                 None => { return }
             };
+            data.dnd_offer = None;
             device.leave();
         });
     }
@@ -187,6 +189,7 @@ impl WLCDataState {
             if unfocus {
                 device.leave();
                 data.dnd_focus = None;
+                data.dnd_offer = None;
             }
         });
 
@@ -213,6 +216,7 @@ impl WLCDataState {
             let offer = device_client.create_resource::<
                 WlDataOffer, WLCDataOffer, WLCState
             >(&self.display_handle, device.version(), offer_data).unwrap();
+            data.dnd_offer = Some(offer.clone());
 
             // Send offer to client
             device.data_offer(&offer);
@@ -238,6 +242,22 @@ impl WLCDataState {
 
             device.motion(time, x, y);
             data.last_dnd_motion = Some(pos);
+        });
+    }
+
+    pub fn dnd_drop(&mut self) {
+        let dnd = match self.dnd.take() {
+            Some(d) => d,
+            None => { return }
+        };
+        let action = wl_ddm::DndAction::Copy;
+        dnd.source.action(action);
+        dnd.source.dnd_drop_performed();
+
+        self.for_all_devices(|device, data| {
+            if data.dnd_focus.is_none() { return }
+            data.dnd_offer.as_ref().unwrap().action(action);
+            device.drop();
         });
     }
 
@@ -295,6 +315,7 @@ impl Dispatch<WlDDM, ()> for WLCState {
                 let device_data = WLCDataDeviceData {
                     dnd_focus: None,
                     last_dnd_motion: None,
+                    dnd_offer: None,
                 };
                 let device_data = Arc::new(Mutex::new(device_data));
                 let device = data_init.init(id, device_data.clone());
@@ -479,14 +500,9 @@ impl Dispatch<WlDataOffer, WLCDataOffer> for WLCState {
                     dnd.mime = mime_type;
                 });
             },
-            wl_data_offer::Request::Destroy { .. } => {},
+            wl_data_offer::Request::Destroy => {},
             wl_data_offer::Request::Finish => {
-                let dnd = match &mut state.data.dnd {
-                    Some(d) => d,
-                    None => { return }
-                };
                 with_offer_data(offer, |data| {
-                    if data.source != dnd.source { return }
                     data.source.dnd_finished();
                 });
             },

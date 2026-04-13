@@ -1,6 +1,5 @@
 package dev.evvie.waylandcraft.grabs;
 
-import dev.evvie.waylandcraft.WaylandCraft;
 import dev.evvie.waylandcraft.bridge.WLCAbstractWindow;
 import dev.evvie.waylandcraft.bridge.WLCSurface;
 import dev.evvie.waylandcraft.grabs.PointerGrabMap.ImplicitGrab;
@@ -18,7 +17,7 @@ public class DNDGrab extends PointerGrab {
 	
 	@Override
 	public void release() throws GrabDroppedException {
-		wlc.bridge.cancelDnd();
+		wlc.bridge.dndDrop();
 	}
 	
 	@Override
