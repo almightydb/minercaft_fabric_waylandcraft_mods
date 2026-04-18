@@ -1,13 +1,8 @@
 package dev.evvie.waylandcraft.desktop;
 
-import org.apache.commons.codec.digest.DigestUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import dev.evvie.waylandcraft.WaylandCraft;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.resources.ResourceLocation;
 
 public class DesktopEntry {
@@ -21,9 +16,7 @@ public class DesktopEntry {
 	public final String[] keywords;
 	public final String[] categories;
 	public boolean visible;
-	protected String iconPath;
-	private ResourceLocation icon = null;
-	private boolean iconLoaded = false;
+	private DesktopIcon icon = null;
 	
 	public DesktopEntry(String appId, String name, String genericName, String exec, boolean execTerminal, String comment, String[] keywords, String[] categories, boolean visible, String iconPath) {
 		this.appId = appId;
@@ -35,26 +28,23 @@ public class DesktopEntry {
 		this.keywords = keywords;
 		this.categories = categories;
 		this.visible = visible;
-		this.icon = null;
-		this.iconPath = iconPath;
+		
+		if(iconPath != null) this.icon = new DesktopIcon(appId, iconPath);
 	}
 	
 	public ResourceLocation getIcon() {
-		if(iconLoaded) return icon;
-		iconLoaded = true;
-		
-		AbstractTexture texture = WaylandCraft.instance.xdgManager.tryLoadIcon(iconPath);
-		if(texture == null) return null;
-		
-		TextureManager textureManager = Minecraft.getInstance().getTextureManager();
-		icon = new ResourceLocation(WaylandCraft.MOD_ID, "icon_" + DigestUtils.sha1Hex(appId));
-		textureManager.register(icon, texture);
-		return icon;
+		if(icon == null) return null;
+		return icon.getTextureLocation();
+	}
+	
+	protected void preloadIcon() {
+		if(icon == null) return;
+		icon.preload();
 	}
 	
 	@Override
 	public String toString() {
-		return "DesktopEntry [appId: " + appId + ", name: " + name + ", genericName: " + genericName + ", exec: '" + exec + "', execTerminal: " + execTerminal + ", visible: " + visible + ", iconPath" + iconPath + ", icon: " + icon + "]";
+		return "DesktopEntry [appId: " + appId + ", name: " + name + ", genericName: " + genericName + ", exec: '" + exec + "', execTerminal: " + execTerminal + ", visible: " + visible + ", icon: " + icon + "]";
 	}
 	
 }
