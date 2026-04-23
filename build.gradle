@@ -57,6 +57,10 @@ jar {
 	from("LICENSE") {
 		rename { "${it}_${inputs.properties.archivesName}"}
 	}
+
+	def nativeFile = file("native/target/debug/libwaylandcraft.so")
+	if(!nativeFile.exists()) { ant.fail("native library not built!") }
+	from(nativeFile)
 }
 
 loom {

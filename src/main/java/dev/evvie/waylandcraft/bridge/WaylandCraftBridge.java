@@ -1,6 +1,9 @@
 package dev.evvie.waylandcraft.bridge;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -13,6 +16,7 @@ import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWNativeEGL;
 
 import dev.evvie.waylandcraft.CursorShape;
+import dev.evvie.waylandcraft.WaylandCraft;
 import dev.evvie.waylandcraft.bridge.WLCAbstractWindow.SurfaceGeometry;
 import dev.evvie.waylandcraft.desktop.RawDesktopEntry;
 import dev.evvie.waylandcraft.render.BufferTexture.DmabufTexture;
@@ -37,7 +41,33 @@ public class WaylandCraftBridge {
 	private @Nullable ResizeRequest lastResizeRequest = null;
 	
 	static {
-		System.loadLibrary("waylandcraft");
+		boolean loaded = false;
+		InputStream inputStream = WaylandCraftBridge.class.getResourceAsStream("/libwaylandcraft.so");
+		if(inputStream != null) {
+			try {
+				byte[] data = inputStream.readAllBytes();
+				inputStream.close();
+				
+				File temp = File.createTempFile("waylandcraft-", "-libwaylandcraft.so");
+				temp.deleteOnExit();
+				
+				FileOutputStream outputStream = new FileOutputStream(temp);
+				outputStream.write(data);
+				outputStream.close();
+				
+				System.load(temp.getAbsolutePath());
+				loaded = true;
+				
+				WaylandCraft.LOGGER.info("Loaded native library from jar");
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		if(!loaded) {
+			WaylandCraft.LOGGER.info("Native library could not be loaded from jar. Attempting to load from system");
+			System.loadLibrary("waylandcraft");
+		}
 	}
 	
 	private WaylandCraftBridge(long handle) {
