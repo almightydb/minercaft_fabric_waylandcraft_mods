@@ -33,7 +33,7 @@ import dev.evvie.waylandcraft.item.WindowItem;
 import dev.evvie.waylandcraft.item.WindowItemManager;
 import dev.evvie.waylandcraft.render.WindowInHandRenderer;
 import dev.evvie.waylandcraft.render.WindowInItemFrameRenderer;
-import dev.evvie.waylandcraft.render.WindowItemModel;
+import dev.evvie.waylandcraft.render.model.WindowItemModel;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettingsManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.ModInitializer;
