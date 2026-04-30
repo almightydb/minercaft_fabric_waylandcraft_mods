@@ -5,7 +5,7 @@ Wayland Compositor in Minecraft
 - core
 	- wl_compositor
 	- wl_subcompositor
-	- wl_data_device_manager
+	- wl_data_device_manager *(drag n' drop, clipboard)*
 	- wl_shm
 	- wl_seat *(pointer, keyboard)*
 	- wl_output
@@ -13,13 +13,13 @@ Wayland Compositor in Minecraft
 - viewporter
 - single-pixel-buffer-v1
 - linux-dmabuf-v1
-- cursor-shape-v1 *(partially)*
+- cursor-shape-v1 *(not all cursors)*
 - pointer-constraints-unstable-v1 *(only locked pointers)*
 - relative-pointer-unstable-v1
 
 ## System dependencies
 - OS: Linux
-- Minecraft 1.20.6
+- Minecraft 26.1.2
 - Fabric mod loader
 - xkbcommon library 1.11.0
 - xkbcommon tools (xkbcli)
