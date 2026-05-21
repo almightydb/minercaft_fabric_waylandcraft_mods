@@ -50,6 +50,10 @@ Try setting the environment variable `__GL_THREADED_OPTIMIZATIONS=0` in your lau
 ### Weird graphical issues
 Some users reported success by setting the `Improved Transparency` option in the game settings to enabled.
 
+### Only minecraft launcher shows up in the applications
+Make sure you don't use a sandboxed version of the launcher, i.e. don't
+use the Flatpak, go with a natively installed version of it.
+
 ## Building and Running
 You need a Rust development environment and a Java 25 SDK.
 ```sh
