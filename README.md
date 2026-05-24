@@ -16,6 +16,7 @@ Now available on [Modrinth](https://modrinth.com/mod/waylandcraft)!
 Additionally recommended:
 - Prism Launcher
 - Sodium
+- xwayland-satellite
 
 ## Important notes for installing / using!!!
 1. Do not use a Minecraft launcher packaged as a flatpak! You won't be able to use your apps.
@@ -31,6 +32,13 @@ the windows, `B` opens the window manager screen.
 ### How can I press Escape in the windows?
 Instead of using `G` to capture the keyboard, use `ALT+Q` instead. The only way to turn it off is to press `ALT-Q` again,
 so the `ESC` key is forwarded to the application.
+
+### How do I run X11 apps?
+Right now Xwayland isn't directly integrated yet. Instead you'll need to install
+[xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite). Just run `xwayland-sateliite :2`
+(or choose a different number than two) in a terminal inside of the game. Then
+when launching X11 apps you need to specify the DISPLAY environment variable. For example if you want to run Steam,
+run `DISPLAY=:2 steam` (in another terminal tab or window).
 
 ### How to do the relative mouse movement thing for 3D games?
 Move your mouse over the window, then activate the hard keyboard capture mode. (`ALT-Q`)
