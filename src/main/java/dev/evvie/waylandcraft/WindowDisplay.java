@@ -3,7 +3,9 @@ package dev.evvie.waylandcraft;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix3d;
 import org.joml.Vector3d;
+import org.lwjgl.glfw.GLFW;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 import dev.evvie.waylandcraft.bridge.WLCAbstractWindow;
@@ -210,6 +212,19 @@ public class WindowDisplay {
 	
 	public void anchorToEntity(Entity entity) {
 		anchorToPosView(WaylandCraftUtils.getPosition(entity), WaylandCraftUtils.getLookVector(entity), WaylandCraftUtils.getUpVector(entity));
+	}
+	
+	public void doGrabMove(Vec3 pos, Vec3 view, Vec3 up, float yRot) {
+		this.anchorToPosView(pos, view, up);
+		
+		boolean modDown = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_LEFT_ALT);
+		boolean ctrlDown = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL);
+		if(modDown) {
+			this.trySnapWorld(pos, view, yRot, ctrlDown);
+		}
+		else if(ctrlDown) {
+			this.trySnapToOtherWindows(pos, view);
+		}
 	}
 	
 	public void trySnapWorld(Vec3 pos, Vec3 view, float yRot, boolean center) {
