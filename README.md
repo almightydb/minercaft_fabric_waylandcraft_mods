@@ -21,8 +21,7 @@ Additionally recommended:
 ## Important notes for installing / using!!!
 1. Do not use a Minecraft launcher packaged as a flatpak! You won't be able to use your apps.
 2. For nvidia: Set the `__GL_THREADED_OPTIMIZATIONS` environment variable to `0` in your launcher.
-3. If you have weird graphics glitches on nvidia, enable the "Improved Transparency" option in the video settings.
-4. The Zink OpenGL driver has been known to cause issues. Use native OpenGL instead.
+3. The Zink OpenGL driver has been known to cause issues. Use native OpenGL instead.
 
 ## Frequently Asked Questions
 ### How do I use this thing?
