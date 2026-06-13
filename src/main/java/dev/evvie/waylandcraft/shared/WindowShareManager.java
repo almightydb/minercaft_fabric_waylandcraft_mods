@@ -1,0 +1,279 @@
+package dev.evvie.waylandcraft.shared;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import dev.evvie.waylandcraft.WaylandCraft;
+import dev.evvie.waylandcraft.WaylandCraftCommon;
+import dev.evvie.waylandcraft.bridge.WLCToplevel;
+import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
+import dev.evvie.waylandcraft.render.SharedWindowDisplay;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.minecraft.client.Minecraft;
+
+/**
+ * 窗口共享管理器
+ * 协调窗口共享的完整流程
+ */
+public class WindowShareManager {
+	
+	private static final Logger LOGGER = LoggerFactory.getLogger("waylandcraft-share-manager");
+	
+	// 客户端实例
+	private final WaylandCraft clientMod;
+	
+	// 服务器端实例
+	private final WaylandCraftCommon serverMod;
+	
+	// 图像捕获配置
+	private ImageCapture.CaptureConfig captureConfig;
+	
+	// 帧率控制器
+	private final FrameRateController frameRateController;
+	
+	// 差分更新管理器
+	private final DiffUpdateManager diffUpdateManager;
+	
+	// 共享状态: windowHandle -> ShareState
+	private final Map<Long, ShareState> shareStates = new ConcurrentHashMap<>();
+	
+	// 是否启用共享
+	private boolean sharingEnabled = true;
+	
+	/**
+	 * 构造函数（客户端）
+	 */
+	public WindowShareManager(WaylandCraft clientMod) {
+		this.clientMod = clientMod;
+		this.serverMod = null;
+		this.captureConfig = new ImageCapture.CaptureConfig(0.5f, 0.7f, 20);
+		this.frameRateController = new FrameRateController();
+		this.diffUpdateManager = new DiffUpdateManager();
+		
+		// 注册客户端事件
+		registerClientEvents();
+		
+		LOGGER.info("WindowShareManager initialized (client)");
+	}
+	
+	/**
+	 * 构造函数（服务器端）
+	 */
+	public WindowShareManager(WaylandCraftCommon serverMod) {
+		this.clientMod = null;
+		this.serverMod = serverMod;
+		this.captureConfig = null;
+		this.frameRateController = new FrameRateController();
+		this.diffUpdateManager = new DiffUpdateManager();
+		
+		LOGGER.info("WindowShareManager initialized (server)");
+	}
+	
+	/**
+	 * 注册客户端事件
+	 */
+	private void registerClientEvents() {
+		// 玩家断开连接时清理
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			handleDisconnect();
+		});
+	}
+	
+	/**
+	 * 开始共享窗口
+	 */
+	public boolean startSharing(long windowHandle, String windowTitle) {
+		if(clientMod == null) {
+			LOGGER.warn("Cannot start sharing on server side");
+			return false;
+		}
+		
+		// 检查是否已经共享
+		if(shareStates.containsKey(windowHandle)) {
+			LOGGER.warn("Window 0x{} is already being shared", Long.toHexString(windowHandle));
+			return false;
+		}
+		
+		// 创建共享状态
+		ShareState state = new ShareState(windowHandle, windowTitle);
+		shareStates.put(windowHandle, state);
+		
+		// 发送注册请求到服务器
+		SharedWindowClientHandler.requestWindowRegister(windowHandle, windowTitle);
+		
+		LOGGER.info("Started sharing window 0x{}: {}", Long.toHexString(windowHandle), windowTitle);
+		return true;
+	}
+	
+	/**
+	 * 停止共享窗口
+	 */
+	public boolean stopSharing(long windowHandle) {
+		ShareState state = shareStates.remove(windowHandle);
+		if(state == null) {
+			LOGGER.warn("Window 0x{} is not being shared", Long.toHexString(windowHandle));
+			return false;
+		}
+		
+		// 发送注销请求到服务器
+		// TODO: 实现注销请求
+		
+		// 清理差分更新缓存
+		diffUpdateManager.clearWindow(windowHandle);
+		frameRateController.reset(windowHandle);
+		
+		LOGGER.info("Stopped sharing window 0x{}", Long.toHexString(windowHandle));
+		return true;
+	}
+	
+	/**
+	 * 更新共享窗口
+	 * 应该在每个客户端tick中调用
+	 */
+	public void update() {
+		if(clientMod == null || !sharingEnabled) return;
+		
+		// 遍历所有共享窗口
+		for(ShareState state : shareStates.values()) {
+			updateSharedWindow(state);
+		}
+	}
+	
+	/**
+	 * 更新单个共享窗口
+	 */
+	private void updateSharedWindow(ShareState state) {
+		// 检查帧率限制
+		if(!frameRateController.shouldUpdate(state.windowHandle, captureConfig.maxFps)) {
+			return;
+		}
+		
+		// 获取本地窗口
+		WLCToplevel toplevel = getLocalWindow(state.windowHandle);
+		if(toplevel == null || !toplevel.isMapped()) {
+			return;
+		}
+		
+		// 捕获窗口图像
+		byte[] imageData = ImageCapture.captureFramebuffer(
+			0, 0,
+			toplevel.geometry.width(),
+			toplevel.geometry.height(),
+			captureConfig.scale,
+			captureConfig.quality
+		);
+		
+		if(imageData == null) {
+			return;
+		}
+		
+		// 处理差分更新
+		byte[] processedData = diffUpdateManager.processFrame(state.windowHandle, imageData);
+		if(processedData == null) {
+			return;
+		}
+		
+		// 发送图像数据到服务器
+		// TODO: 实现图像数据发送
+		
+		// 更新统计信息
+		state.lastUpdateTime = System.currentTimeMillis();
+		state.frameCount++;
+		state.totalBytes += processedData.length;
+	}
+	
+	/**
+	 * 获取本地窗口
+	 */
+	@Nullable
+	private WLCToplevel getLocalWindow(long windowHandle) {
+		if(clientMod == null || clientMod.bridge == null) {
+			return null;
+		}
+		return clientMod.bridge.getToplevel(windowHandle);
+	}
+	
+	/**
+	 * 处理断开连接
+	 */
+	private void handleDisconnect() {
+		shareStates.clear();
+		diffUpdateManager.clear();
+		frameRateController.clear();
+		LOGGER.info("Cleared all share states due to disconnect");
+	}
+	
+	/**
+	 * 获取共享状态
+	 */
+	@Nullable
+	public ShareState getShareState(long windowHandle) {
+		return shareStates.get(windowHandle);
+	}
+	
+	/**
+	 * 获取所有共享状态
+	 */
+	public Map<Long, ShareState> getAllShareStates() {
+		return Map.copyOf(shareStates);
+	}
+	
+	/**
+	 * 设置捕获配置
+	 */
+	public void setCaptureConfig(ImageCapture.CaptureConfig config) {
+		this.captureConfig = config;
+		LOGGER.info("Updated capture config: scale={}, quality={}, maxFps={}", 
+			config.scale, config.quality, config.maxFps);
+	}
+	
+	/**
+	 * 启用/禁用共享
+	 */
+	public void setSharingEnabled(boolean enabled) {
+		this.sharingEnabled = enabled;
+		LOGGER.info("Sharing {}", enabled ? "enabled" : "disabled");
+	}
+	
+	/**
+	 * 检查是否启用共享
+	 */
+	public boolean isSharingEnabled() {
+		return sharingEnabled;
+	}
+	
+	/**
+	 * 获取统计信息
+	 */
+	public String getStats() {
+		long totalFrames = shareStates.values().stream().mapToLong(s -> s.frameCount).sum();
+		long totalBytes = shareStates.values().stream().mapToLong(s -> s.totalBytes).sum();
+		
+		return String.format("Windows: %d, Frames: %d, Bytes: %d", 
+			shareStates.size(), totalFrames, totalBytes);
+	}
+	
+	/**
+	 * 共享状态内部类
+	 */
+	public static class ShareState {
+		public final long windowHandle;
+		public final String windowTitle;
+		public final long startTime;
+		
+		public long lastUpdateTime = 0;
+		public long frameCount = 0;
+		public long totalBytes = 0;
+		
+		public ShareState(long windowHandle, String windowTitle) {
+			this.windowHandle = windowHandle;
+			this.windowTitle = windowTitle;
+			this.startTime = System.currentTimeMillis();
+		}
+	}
+}
