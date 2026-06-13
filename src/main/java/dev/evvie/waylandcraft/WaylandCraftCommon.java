@@ -8,6 +8,8 @@ import dev.evvie.waylandcraft.item.ServerItemManager;
 import dev.evvie.waylandcraft.item.WindowItem;
 import dev.evvie.waylandcraft.item.WindowItemInteractionProvider;
 import dev.evvie.waylandcraft.network.WaylandCraftNetworking;
+import dev.evvie.waylandcraft.shared.SharedWindowManager;
+import dev.evvie.waylandcraft.shared.PermissionManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 
@@ -19,6 +21,10 @@ public class WaylandCraftCommon implements ModInitializer {
 	
 	public @Nullable WindowItemInteractionProvider windowItemInteractionProvider = null;
 	public ServerItemManager serverItemManager = new ServerItemManager();
+	
+	// 多人显示功能
+	public SharedWindowManager sharedWindowManager = new SharedWindowManager();
+	public PermissionManager permissionManager = new PermissionManager();
 	
 	@Override
 	public void onInitialize() {
