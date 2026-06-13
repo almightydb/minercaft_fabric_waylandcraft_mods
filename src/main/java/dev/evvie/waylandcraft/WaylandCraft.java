@@ -33,9 +33,11 @@ import dev.evvie.waylandcraft.item.WindowItemManager;
 import dev.evvie.waylandcraft.render.WindowInHandRenderer;
 import dev.evvie.waylandcraft.render.WindowInItemFrameRenderer;
 import dev.evvie.waylandcraft.render.model.WindowItemModel;
+import dev.evvie.waylandcraft.render.SharedWindowDisplay;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettings;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettingsManager;
 import dev.evvie.waylandcraft.utils.CursorShape;
+import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
@@ -77,6 +79,10 @@ public class WaylandCraft implements ClientModInitializer {
 	public HitResult trueGameHitResult = null;
 	
 	public WLCToplevel pinnedToplevel = null;
+	
+	// 多人显示功能
+	public RemoteWindowRenderer remoteWindowRenderer = new RemoteWindowRenderer();
+	public ArrayList<SharedWindowDisplay> sharedDisplays = new ArrayList<SharedWindowDisplay>();
 	
 	public WindowItemManager itemManager = new WindowItemManager();
 	public XDGDesktopManager xdgManager;
