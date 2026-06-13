@@ -31,7 +31,7 @@ public class ServerEventHandler {
 		// 玩家离开服务器
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
 			ServerPlayer player = handler.getPlayer();
-			handlePlayerDisconnect(player);
+			handlePlayerDisconnect(player, server);
 		});
 		
 		LOGGER.info("Server event handlers registered");
@@ -51,7 +51,7 @@ public class ServerEventHandler {
 	/**
 	 * 处理玩家断开连接
 	 */
-	private static void handlePlayerDisconnect(ServerPlayer player) {
+	private static void handlePlayerDisconnect(ServerPlayer player, net.minecraft.server.MinecraftServer server) {
 		UUID playerUUID = player.getUUID();
 		LOGGER.info("Player {} disconnecting, cleaning up shared windows", playerUUID);
 		

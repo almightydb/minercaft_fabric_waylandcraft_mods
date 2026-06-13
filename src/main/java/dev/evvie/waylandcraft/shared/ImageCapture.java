@@ -17,6 +17,7 @@ import org.jetbrains.annotations.Nullable;
 import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import dev.evvie.waylandcraft.render.WindowFramebuffer;
 
 /**
  * 图像捕获和压缩模块
