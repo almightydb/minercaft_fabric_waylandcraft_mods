@@ -1,0 +1,245 @@
+package dev.evvie.waylandcraft.render;
+
+import org.jetbrains.annotations.Nullable;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+
+import dev.evvie.waylandcraft.WindowDisplay;
+import dev.evvie.waylandcraft.WaylandCraft;
+import dev.evvie.waylandcraft.bridge.WLCAbstractWindow;
+import dev.evvie.waylandcraft.math.WorldPlane;
+import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
+import dev.evvie.waylandcraft.shared.WindowPermission;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
+import net.minecraft.client.Camera;
+import net.minecraft.world.phys.Vec3;
+
+/**
+ * 共享窗口显示类
+ * 用于显示远程玩家共享的窗口
+ */
+public class SharedWindowDisplay {
+	
+	private final long windowHandle;
+	private final String windowTitle;
+	private final String ownerName;
+	
+	// 窗口位置和方向
+	private Vec3 pivot = new Vec3(0, 0, 0);
+	private Vec3 normal = new Vec3(0, 0, 1);
+	private Vec3 down = new Vec3(0, -1, 0);
+	
+	// 窗口尺寸
+	private int width;
+	private int height;
+	
+	// 权限
+	private WindowPermission permission = WindowPermission.VIEW;
+	
+	// 渲染器
+	private final RemoteWindowRenderer renderer;
+	
+	// 是否可见
+	private boolean visible = true;
+	
+	// 锚定距离
+	public double anchorDistance = 2.0;
+	
+	public SharedWindowDisplay(long windowHandle, String windowTitle, String ownerName, RemoteWindowRenderer renderer) {
+		this.windowHandle = windowHandle;
+		this.windowTitle = windowTitle;
+		this.ownerName = ownerName;
+		this.renderer = renderer;
+	}
+	
+	/**
+	 * 获取窗口句柄
+	 */
+	public long getWindowHandle() {
+		return windowHandle;
+	}
+	
+	/**
+	 * 获取窗口标题
+	 */
+	public String getWindowTitle() {
+		return windowTitle;
+	}
+	
+	/**
+	 * 获取所有者名称
+	 */
+	public String getOwnerName() {
+		return ownerName;
+	}
+	
+	/**
+	 * 设置权限
+	 */
+	public void setPermission(WindowPermission permission) {
+		this.permission = permission;
+	}
+	
+	/**
+	 * 获取权限
+	 */
+	public WindowPermission getPermission() {
+		return permission;
+	}
+	
+	/**
+	 * 设置可见性
+	 */
+	public void setVisible(boolean visible) {
+		this.visible = visible;
+	}
+	
+	/**
+	 * 是否可见
+	 */
+	public boolean isVisible() {
+		return visible;
+	}
+	
+	/**
+	 * 更新窗口位置
+	 */
+	public void updatePosition(int x, int y) {
+		// 将屏幕坐标转换为世界坐标
+		// 这里简化处理，实际需要根据窗口朝向计算
+	}
+	
+	/**
+	 * 更新窗口大小
+	 */
+	public void updateSize(int width, int height) {
+		this.width = width;
+		this.height = height;
+	}
+	
+	/**
+	 * 获取像素缩放比例
+	 */
+	public float pixelScale() {
+		return 1.0f / 16.0f; // 默认16像素每方块
+	}
+	
+	/**
+	 * 获取局部X轴方向
+	 */
+	public Vec3 localX() {
+		return normal.cross(down).scale(pixelScale());
+	}
+	
+	/**
+	 * 获取局部Y轴方向
+	 */
+	public Vec3 localY() {
+		return down.scale(pixelScale());
+	}
+	
+	/**
+	 * 获取原点位置
+	 */
+	public Vec3 origin() {
+		return pivot.add(localX().scale(-width/2)).add(localY().scale(-height/2));
+	}
+	
+	/**
+	 * 获取世界平面
+	 */
+	public WorldPlane getPlane() {
+		return new WorldPlane(origin(), localX(), localY(), normal);
+	}
+	
+	/**
+	 * 旋转窗口
+	 */
+	public void rotate(Vec3 normal, Vec3 down) {
+		this.normal = normal;
+		this.down = down;
+	}
+	
+	/**
+	 * 移动原点
+	 */
+	public void moveOrigin(Vec3 pos) {
+		pivot = pos.add(localX().scale(width/2)).add(localY().scale(height/2));
+	}
+	
+	/**
+	 * 锚定到位置和视角
+	 */
+	public void anchorToPosView(Vec3 pos, Vec3 look, Vec3 up) {
+		this.pivot = pos.add(look.scale(this.anchorDistance));
+		this.rotate(look.reverse(), up.reverse());
+	}
+	
+	/**
+	 * 锚定到相机
+	 */
+	public void anchorToCamera(Camera camera) {
+		anchorToPosView(camera.position(), new Vec3(camera.forwardVector()), new Vec3(camera.upVector()));
+	}
+	
+	/**
+	 * 调整锚定距离
+	 */
+	public void adjustAnchorDistance(double delta) {
+		this.anchorDistance = Math.clamp(this.anchorDistance + delta * 0.1d, 0.5d, 20d);
+	}
+	
+	/**
+	 * 渲染共享窗口
+	 */
+	public void render(LevelRenderContext ctx) {
+		if(!visible) return;
+		if(!renderer.hasTexture(windowHandle)) return;
+		
+		int textureId = renderer.getTextureId(windowHandle);
+		if(textureId < 0) return;
+		
+		// 获取渲染所需的各种向量
+		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
+		Vec3 originRel = origin().subtract(cameraPos);
+		
+		Vec3 localX = localX();
+		Vec3 localY = localY();
+		
+		// 计算四个角的位置
+		Vec3 tl = new Vec3(0, 0, 0);
+		Vec3 bl = localY.scale(height);
+		Vec3 br = bl.add(localX.scale(width));
+		Vec3 tr = localX.scale(width);
+		
+		// 渲染纹理
+		PoseStack poseStack = ctx.poseStack();
+		poseStack.pushPose();
+		poseStack.translate(originRel.x, originRel.y, originRel.z);
+		
+		// 使用RenderUtils渲染纹理
+		RenderUtils.renderRemoteTexture(textureId, poseStack, ctx.submitNodeCollector(), tl, bl, br, tr);
+		
+		poseStack.popPose();
+	}
+	
+	/**
+	 * 窗口是否有效
+	 */
+	public boolean isValid() {
+		return visible && renderer.hasTexture(windowHandle);
+	}
+	
+	@Override
+	public boolean equals(Object obj) {
+		if(this == obj) return true;
+		if(!(obj instanceof SharedWindowDisplay)) return false;
+		SharedWindowDisplay other = (SharedWindowDisplay) obj;
+		return windowHandle == other.windowHandle;
+	}
+	
+	@Override
+	public int hashCode() {
+		return Long.hashCode(windowHandle);
+	}
+}
