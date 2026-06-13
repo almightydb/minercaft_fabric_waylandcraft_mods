@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import dev.evvie.waylandcraft.item.ServerItemManager;
 import dev.evvie.waylandcraft.item.WindowItem;
 import dev.evvie.waylandcraft.item.WindowItemInteractionProvider;
+import dev.evvie.waylandcraft.network.ServerEventHandler;
 import dev.evvie.waylandcraft.network.WaylandCraftNetworking;
 import dev.evvie.waylandcraft.shared.SharedWindowManager;
 import dev.evvie.waylandcraft.shared.PermissionManager;
@@ -31,6 +32,9 @@ public class WaylandCraftCommon implements ModInitializer {
 		instance = this;
 		WindowItem.register();
 		WaylandCraftNetworking.register();
+		
+		// 注册服务器事件处理器
+		ServerEventHandler.register();
 		
 		ServerTickEvents.START_LEVEL_TICK.register(serverItemManager);
 	}
