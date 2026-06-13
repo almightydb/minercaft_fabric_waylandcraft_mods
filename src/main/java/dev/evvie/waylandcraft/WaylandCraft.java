@@ -36,6 +36,7 @@ import dev.evvie.waylandcraft.render.model.WindowItemModel;
 import dev.evvie.waylandcraft.render.SharedWindowDisplay;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettings;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettingsManager;
+import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
 import dev.evvie.waylandcraft.utils.CursorShape;
 import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import net.fabricmc.api.ClientModInitializer;
@@ -152,6 +153,11 @@ public class WaylandCraft implements ClientModInitializer {
 		if(bridge == null) return;
 		
 		displays.forEach((d) -> d.render(ctx));
+		
+		// 渲染共享窗口
+		for(SharedWindowDisplay sharedDisplay : sharedDisplays) {
+			sharedDisplay.render(ctx);
+		}
 	}
 	
 	public void updateWorld(LevelExtractionContext ctx) {
