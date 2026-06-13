@@ -1,0 +1,282 @@
+package dev.evvie.waylandcraft.network;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import dev.evvie.waylandcraft.WaylandCraft;
+import dev.evvie.waylandcraft.render.SharedWindowDisplay;
+import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
+import dev.evvie.waylandcraft.shared.WindowPermission;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.Minecraft;
+
+/**
+ * 客户端窗口接收处理器
+ * 处理从服务器接收的共享窗口数据
+ */
+public class SharedWindowClientHandler {
+	
+	private static final Logger LOGGER = LoggerFactory.getLogger("waylandcraft-client-handler");
+	
+	// 远程窗口缓存: windowHandle -> WindowInfo
+	private static final Map<Long, WindowInfo> remoteWindows = new ConcurrentHashMap<>();
+	
+	/**
+	 * 注册客户端网络处理器
+	 */
+	public static void register() {
+		// 处理窗口列表更新
+		ClientPlayNetworking.registerGlobalReceiver(SharedWindowListPayload.TYPE, (payload, ctx) -> {
+			ctx.client().execute(() -> {
+				handleWindowListUpdate(payload);
+			});
+		});
+		
+		// 处理窗口状态更新
+		ClientPlayNetworking.registerGlobalReceiver(SharedWindowUpdatePayload.TYPE, (payload, ctx) -> {
+			ctx.client().execute(() -> {
+				handleWindowStateUpdate(payload);
+			});
+		});
+		
+		// 处理窗口图像更新
+		ClientPlayNetworking.registerGlobalReceiver(SharedWindowImagePayload.TYPE, (payload, ctx) -> {
+			ctx.client().execute(() -> {
+				handleWindowImageUpdate(payload);
+			});
+		});
+		
+		// 处理权限更新
+		ClientPlayNetworking.registerGlobalReceiver(SharedWindowPermissionPayload.TYPE, (payload, ctx) -> {
+			ctx.client().execute(() -> {
+				handlePermissionUpdate(payload);
+			});
+		});
+		
+		LOGGER.info("Shared window client handlers registered");
+	}
+	
+	/**
+	 * 处理窗口列表更新
+	 */
+	private static void handleWindowListUpdate(SharedWindowListPayload payload) {
+		List<SharedWindowListPayload.WindowInfo> windowList = payload.windows();
+		
+		LOGGER.info("Received window list update: {} windows", windowList.size());
+		
+		// 更新远程窗口缓存
+		remoteWindows.clear();
+		for(SharedWindowListPayload.WindowInfo info : windowList) {
+			remoteWindows.put(info.windowHandle(), new WindowInfo(
+				info.windowHandle(),
+				info.ownerUUID(),
+				info.windowTitle(),
+				info.permission()
+			));
+		}
+		
+		// 更新WaylandCraft的共享窗口显示
+		updateSharedDisplays();
+	}
+	
+	/**
+	 * 处理窗口状态更新
+	 */
+	private static void handleWindowStateUpdate(SharedWindowUpdatePayload payload) {
+		WindowInfo info = remoteWindows.get(payload.windowHandle());
+		if(info == null) {
+			LOGGER.warn("Received state update for unknown window 0x{}", 
+				Long.toHexString(payload.windowHandle()));
+			return;
+		}
+		
+		// 更新窗口状态
+		info.updateState(payload.x(), payload.y(), payload.width(), payload.height(), payload.visible());
+		
+		// 更新对应的SharedWindowDisplay
+		updateSharedDisplay(info);
+	}
+	
+	/**
+	 * 处理窗口图像更新
+	 */
+	private static void handleWindowImageUpdate(SharedWindowImagePayload payload) {
+		WindowInfo info = remoteWindows.get(payload.windowHandle());
+		if(info == null) {
+			return;
+		}
+		
+		// 更新图像数据
+		info.updateImage(payload.imageData(), payload.width(), payload.height());
+		
+		// 更新RemoteWindowRenderer
+		WaylandCraft instance = WaylandCraft.instance;
+		if(instance != null && instance.remoteWindowRenderer != null) {
+			instance.remoteWindowRenderer.updateTexture(
+				payload.windowHandle(),
+				payload.x(), payload.y(),
+				payload.width(), payload.height(),
+				payload.imageData()
+			);
+		}
+	}
+	
+	/**
+	 * 处理权限更新
+	 */
+	private static void handlePermissionUpdate(SharedWindowPermissionPayload payload) {
+		WindowInfo info = remoteWindows.get(payload.windowHandle());
+		if(info == null) {
+			return;
+		}
+		
+		// 更新权限
+		info.setPermission(payload.permission());
+		
+		LOGGER.info("Permission updated for window 0x{}: {}", 
+			Long.toHexString(payload.windowHandle()), payload.permission());
+	}
+	
+	/**
+	 * 更新共享窗口显示
+	 */
+	private static void updateSharedDisplays() {
+		WaylandCraft instance = WaylandCraft.instance;
+		if(instance == null) return;
+		
+		// 清理旧的显示
+		instance.sharedDisplays.clear();
+		
+		// 创建新的显示
+		for(WindowInfo info : remoteWindows.values()) {
+			if(info.permission().hasPermission(WindowPermission.VIEW)) {
+				SharedWindowDisplay display = new SharedWindowDisplay(
+					info.windowHandle(),
+					info.title(),
+					info.ownerName(),
+					instance.remoteWindowRenderer
+				);
+				display.setPermission(info.permission());
+				instance.sharedDisplays.add(display);
+			}
+		}
+		
+		LOGGER.info("Updated shared displays: {} windows", instance.sharedDisplays.size());
+	}
+	
+	/**
+	 * 更新单个共享窗口显示
+	 */
+	private static void updateSharedDisplay(WindowInfo info) {
+		WaylandCraft instance = WaylandCraft.instance;
+		if(instance == null) return;
+		
+		// 查找对应的显示
+		for(SharedWindowDisplay display : instance.sharedDisplays) {
+			if(display.getWindowHandle() == info.windowHandle()) {
+				display.updatePosition(info.x(), info.y());
+				display.updateSize(info.width(), info.height());
+				display.setVisible(info.visible());
+				break;
+			}
+		}
+	}
+	
+	/**
+	 * 请求注册共享窗口
+	 */
+	public static void requestWindowRegister(long windowHandle, String windowTitle) {
+		SharedWindowRegisterPayload payload = new SharedWindowRegisterPayload(windowHandle, windowTitle);
+		ClientPlayNetworking.send(payload);
+		
+		LOGGER.info("Requested window registration: 0x{} - {}", 
+			Long.toHexString(windowHandle), windowTitle);
+	}
+	
+	/**
+	 * 发送交互事件
+	 */
+	public static void sendInteraction(long windowHandle, SharedWindowInteractionPayload.InteractionType type, 
+			double x, double y, int button, int key) {
+		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
+			windowHandle, type, x, y, button, key
+		);
+		ClientPlayNetworking.send(payload);
+	}
+	
+	/**
+	 * 获取远程窗口信息
+	 */
+	public static WindowInfo getRemoteWindow(long windowHandle) {
+		return remoteWindows.get(windowHandle);
+	}
+	
+	/**
+	 * 获取所有远程窗口
+	 */
+	public static List<WindowInfo> getAllRemoteWindows() {
+		return new ArrayList<>(remoteWindows.values());
+	}
+	
+	/**
+	 * 窗口信息内部类
+	 */
+	public static class WindowInfo {
+		private final long windowHandle;
+		private final UUID ownerUUID;
+		private final String title;
+		private WindowPermission permission;
+		
+		private int x, y;
+		private int width, height;
+		private boolean visible = true;
+		
+		private byte[] imageData;
+		private int imageWidth, imageHeight;
+		
+		public WindowInfo(long windowHandle, UUID ownerUUID, String title, WindowPermission permission) {
+			this.windowHandle = windowHandle;
+			this.ownerUUID = ownerUUID;
+			this.title = title;
+			this.permission = permission;
+		}
+		
+		public long windowHandle() { return windowHandle; }
+		public UUID ownerUUID() { return ownerUUID; }
+		public String title() { return title; }
+		public String ownerName() { return ownerUUID.toString(); } // TODO: 获取玩家名
+		public WindowPermission permission() { return permission; }
+		public int x() { return x; }
+		public int y() { return y; }
+		public int width() { return width; }
+		public int height() { return height; }
+		public boolean visible() { return visible; }
+		public byte[] imageData() { return imageData; }
+		public int imageWidth() { return imageWidth; }
+		public int imageHeight() { return imageHeight; }
+		
+		public void setPermission(WindowPermission permission) {
+			this.permission = permission;
+		}
+		
+		public void updateState(int x, int y, int width, int height, boolean visible) {
+			this.x = x;
+			this.y = y;
+			this.width = width;
+			this.height = height;
+			this.visible = visible;
+		}
+		
+		public void updateImage(byte[] imageData, int width, int height) {
+			this.imageData = imageData;
+			this.imageWidth = width;
+			this.imageHeight = height;
+		}
+	}
+}
