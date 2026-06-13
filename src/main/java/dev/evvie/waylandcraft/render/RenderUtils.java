@@ -126,13 +126,32 @@ public class RenderUtils {
 			RenderSetup setup = RenderSetup.builder(WINDOW_TRANSLUCENT_BACKGROUND_PIPELINE)
 					.withTexture("Sampler0", identifier, WINDOW_SAMPLER)
 					.createRenderSetup();
-			return RenderType.create("window_translucent_background", setup);
+		return RenderType.create("window_translucent_background", setup);
+		}
+	);
+	
+	// 远程纹理渲染管线
+	private static final RenderPipeline REMOTE_TEXTURE_PIPELINE = RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET)
+		.withLocation(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "pipeline/remote_texture"))
+		.withVertexShader(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "core/rendertype_window"))
+		.withFragmentShader(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "core/rendertype_window"))
+		.withSampler("Sampler0")
+		.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+		.withVertexFormat(DefaultVertexFormat.POSITION_TEX, VertexFormat.Mode.QUADS)
+		.build();
+	
+	public static final Function<Identifier, RenderType> REMOTE_TEXTURE = Util.memoize(
+		(identifier) -> {
+			RenderSetup setup = RenderSetup.builder(REMOTE_TEXTURE_PIPELINE)
+				.withTexture("Sampler0", identifier, WINDOW_SAMPLER)
+				.createRenderSetup();
+			return RenderType.create("remote_texture", setup);
 		}
 	);
 	
 	public static final RenderPipeline WINDOW_BLIT = RenderPipeline.builder(RenderPipelines.MATRICES_PROJECTION_SNIPPET)
-			.withLocation(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "pipeline/window_blit"))
-			.withVertexShader(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "core/window_blit"))
+		.withLocation(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "pipeline/window_blit"))
+		.withVertexShader(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "core/window_blit"))
 			.withFragmentShader(Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "core/window_blit"))
 			.withSampler("Sampler0")
 			.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
@@ -172,6 +191,35 @@ public class RenderUtils {
 			}
 		}
 		
+	}
+	
+	/**
+	 * 渲染远程纹理
+	 */
+	public static void renderRemoteTexture(int textureId, PoseStack poseStack, SubmitNodeCollector collector, 
+			Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) {
+		if(textureId < 0) return;
+		
+		// 创建临时纹理标识符
+		Identifier textureLocation = Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "remote_" + textureId);
+		
+		// 渲染远程纹理
+		collector.submitCustomGeometry(poseStack, REMOTE_TEXTURE.apply(textureLocation), 
+			new RemoteTextureRenderInstance(tl, bl, br, tr));
+	}
+	
+	/**
+	 * 远程纹理渲染实例
+	 */
+	public static final record RemoteTextureRenderInstance(Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) implements CustomGeometryRenderer {
+		
+		@Override
+		public void render(Pose pose, VertexConsumer buffer) {
+			buffer.addVertex(pose, tl.toVector3f()).setUv(0.0f, 0.0f);
+			buffer.addVertex(pose, bl.toVector3f()).setUv(0.0f, 1.0f);
+			buffer.addVertex(pose, br.toVector3f()).setUv(1.0f, 1.0f);
+			buffer.addVertex(pose, tr.toVector3f()).setUv(1.0f, 0.0f);
+		}
 	}
 	
 	public static void renderFramebuffer2D(GuiGraphicsExtractor context, WindowFramebuffer framebuffer, int x, int y, int w, int h) {
