@@ -135,6 +135,7 @@ public class WaylandCraft implements ClientModInitializer {
 		
 		WindowItemModel.register();
 		hudRenderer.register();
+		SharedWindowClientHandler.register();
 	}
 	
 	/* Update bridge and clients. May be called at any state of the game, even outside of a level
