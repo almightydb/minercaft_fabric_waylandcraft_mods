@@ -89,7 +89,8 @@ public class WaylandCraftNetworking {
 			}
 			
 			// 转发交互给窗口所有者
-			// TODO: 实现交互转发
+			// 转发交互给窗口所有者
+			InteractionForwarder.forwardInteraction(payload, player);
 		});
 	}
 	
