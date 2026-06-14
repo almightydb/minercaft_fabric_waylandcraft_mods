@@ -175,8 +175,12 @@ public class SharedWindowServerHandler {
 		SharedWindowListPayload listPayload = new SharedWindowListPayload(windowList);
 		
 		// 发送给所有在线玩家
-		// 注意：这里需要访问服务器实例，简化处理
-		// 实际实现需要通过事件系统或全局访问点
+		var server = WaylandCraftCommon.instance.server;
+		if(server != null) {
+			for(ServerPlayer player : server.getPlayerList().getPlayers()) {
+				ServerPlayNetworking.send(player, listPayload);
+			}
+		}
 		LOGGER.info("Broadcasting window list: {} windows", windowList.size());
 	}
 	
@@ -184,8 +188,14 @@ public class SharedWindowServerHandler {
 	 * 广播窗口状态更新给订阅者
 	 */
 	private static void broadcastWindowState(SharedWindowEntry entry, SharedWindowUpdatePayload payload) {
-		// TODO: 实现状态更新广播
-		// 需要获取订阅该窗口的玩家列表，然后发送更新
+		var server = WaylandCraftCommon.instance.server;
+		if(server == null) return;
+		for(ServerPlayer player : server.getPlayerList().getPlayers()) {
+			UUID playerUUID = player.getUUID();
+			if(entry.hasPermission(playerUUID, WindowPermission.VIEW)) {
+				ServerPlayNetworking.send(player, payload);
+			}
+		}
 		LOGGER.debug("Broadcasting state update for window 0x{}", Long.toHexString(entry.getWindowHandle()));
 	}
 }

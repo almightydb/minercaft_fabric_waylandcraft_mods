@@ -139,7 +139,7 @@ public class SharedWindowManagerScreen extends Screen {
 	private void unsubscribeSelected() {
 		if(selectedWindow >= 0 && selectedWindow < windowList.size()) {
 			WindowInfo info = windowList.get(selectedWindow);
-			// TODO: 发送取消订阅请求
+			SharedWindowClientHandler.requestWindowUnregister(info.windowHandle());
 		}
 	}
 	

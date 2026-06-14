@@ -13,6 +13,8 @@ import dev.evvie.waylandcraft.shared.SharedWindowManager;
 import dev.evvie.waylandcraft.shared.PermissionManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.minecraft.server.MinecraftServer;
 
 public class WaylandCraftCommon implements ModInitializer {
 	
@@ -26,6 +28,7 @@ public class WaylandCraftCommon implements ModInitializer {
 	// 多人显示功能
 	public SharedWindowManager sharedWindowManager = new SharedWindowManager();
 	public PermissionManager permissionManager = new PermissionManager();
+	public @Nullable MinecraftServer server = null;
 	
 	@Override
 	public void onInitialize() {
@@ -37,6 +40,9 @@ public class WaylandCraftCommon implements ModInitializer {
 		ServerEventHandler.register();
 		
 		ServerTickEvents.START_LEVEL_TICK.register(serverItemManager);
+		
+		ServerLifecycleEvents.SERVER_STARTING.register(server -> { this.server = server; });
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> { this.server = null; });
 	}
 	
 }

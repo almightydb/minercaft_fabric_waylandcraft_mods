@@ -12,6 +12,8 @@ import dev.evvie.waylandcraft.WaylandCraft;
 import dev.evvie.waylandcraft.WaylandCraftCommon;
 import dev.evvie.waylandcraft.bridge.WLCToplevel;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
+import dev.evvie.waylandcraft.network.SharedWindowImagePayload;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import dev.evvie.waylandcraft.render.SharedWindowDisplay;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.Minecraft;
@@ -121,7 +123,7 @@ public class WindowShareManager {
 		}
 		
 		// 发送注销请求到服务器
-		// TODO: 实现注销请求
+		SharedWindowClientHandler.requestWindowUnregister(windowHandle);
 		
 		// 清理差分更新缓存
 		diffUpdateManager.clearWindow(windowHandle);
@@ -179,7 +181,12 @@ public class WindowShareManager {
 		}
 		
 		// 发送图像数据到服务器
-		// TODO: 实现图像数据发送
+		SharedWindowImagePayload imagePayload = new SharedWindowImagePayload(
+			state.windowHandle, 0, 0, 0,
+			toplevel.geometry.width(), toplevel.geometry.height(),
+			processedData
+		);
+		ClientPlayNetworking.send(imagePayload);
 		
 		// 更新统计信息
 		state.lastUpdateTime = System.currentTimeMillis();

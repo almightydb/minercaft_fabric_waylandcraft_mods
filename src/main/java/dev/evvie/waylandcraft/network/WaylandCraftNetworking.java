@@ -20,6 +20,7 @@ public class WaylandCraftNetworking {
 		
 		// 注册多人显示功能的数据包
 		PayloadTypeRegistry.serverboundPlay().register(SharedWindowRegisterPayload.TYPE, SharedWindowRegisterPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SharedWindowUnregisterPayload.TYPE, SharedWindowUnregisterPayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(SharedWindowUpdatePayload.TYPE, SharedWindowUpdatePayload.CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(SharedWindowImagePayload.TYPE, SharedWindowImagePayload.CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SharedWindowInteractionPayload.TYPE, SharedWindowInteractionPayload.CODEC);
@@ -70,6 +71,12 @@ public class WaylandCraftNetworking {
 		});
 		
 		// 处理客户端交互事件
+		ServerPlayNetworking.registerGlobalReceiver(SharedWindowUnregisterPayload.TYPE, (payload, ctx) -> {
+			ctx.server().execute(() -> {
+				SharedWindowServerHandler.handleWindowUnregister(payload.windowHandle(), ctx.player());
+			});
+		});
+		
 		ServerPlayNetworking.registerGlobalReceiver(SharedWindowInteractionPayload.TYPE, (payload, ctx) -> {
 			ServerPlayer player = ctx.player();
 			UUID playerUUID = player.getUUID();

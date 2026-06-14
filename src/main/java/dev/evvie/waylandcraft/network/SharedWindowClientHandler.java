@@ -200,6 +200,15 @@ public class SharedWindowClientHandler {
 	}
 	
 	/**
+	 * 请求注销共享窗口
+	 */
+	public static void requestWindowUnregister(long windowHandle) {
+		SharedWindowUnregisterPayload payload = new SharedWindowUnregisterPayload(windowHandle);
+		ClientPlayNetworking.send(payload);
+		LOGGER.info("Requested window unregistration: 0x{}", Long.toHexString(windowHandle));
+	}
+	
+	/**
 	 * 发送交互事件
 	 */
 	public static void sendInteraction(long windowHandle, SharedWindowInteractionPayload.InteractionType type, 
@@ -250,7 +259,14 @@ public class SharedWindowClientHandler {
 		public long windowHandle() { return windowHandle; }
 		public UUID ownerUUID() { return ownerUUID; }
 		public String title() { return title; }
-		public String ownerName() { return ownerUUID.toString(); } // TODO: 获取玩家名
+		public String ownerName() {
+			var player = net.minecraft.client.Minecraft.getInstance().level;
+			if(player != null) {
+				var p = player.getPlayerByUUID(ownerUUID);
+				if(p != null) return p.getName().getString();
+			}
+			return ownerUUID.toString().substring(0, 8);
+		}
 		public WindowPermission permission() { return permission; }
 		public int x() { return x; }
 		public int y() { return y; }
