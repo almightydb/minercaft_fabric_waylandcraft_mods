@@ -101,7 +101,7 @@ public class WaylandCraftNetworking {
 		SharedWindowListPayload listPayload = new SharedWindowListPayload(windowList);
 		
 		// 发送给所有在线玩家
-		for (ServerPlayer player : excludePlayer.server.getPlayerList().getPlayers()) {
+		for (ServerPlayer player : excludePlayer.level().getServer().getPlayerList().getPlayers()) {
 			if (player != excludePlayer) {
 				ServerPlayNetworking.send(player, listPayload);
 			}

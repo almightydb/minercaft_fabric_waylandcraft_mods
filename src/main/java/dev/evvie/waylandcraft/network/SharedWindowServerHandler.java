@@ -131,7 +131,7 @@ public class SharedWindowServerHandler {
 			playerUUID, targetUUID, Long.toHexString(windowHandle), permission);
 		
 		// 发送权限更新给目标玩家
-		ServerPlayer targetPlayer = player.server.getPlayerList().getPlayer(targetUUID);
+		ServerPlayer targetPlayer = player.level().getServer().getPlayerList().getPlayer(targetUUID);
 		if(targetPlayer != null) {
 			SharedWindowPermissionPayload permissionPayload = new SharedWindowPermissionPayload(
 				windowHandle, playerUUID, permission

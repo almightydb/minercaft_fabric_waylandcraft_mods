@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
-public record SharedWindowInteractionPayload(long windowHandle, InteractionType type, double x, double y, int button, int key) implements CustomPacketPayload {
+public record SharedWindowInteractionPayload(long windowHandle, InteractionType interactionType, double x, double y, int button, int key) implements CustomPacketPayload {
 	
 	public enum InteractionType {
 		MOUSE_MOVE(0),
@@ -41,7 +41,7 @@ public record SharedWindowInteractionPayload(long windowHandle, InteractionType 
 	public static final StreamCodec<RegistryFriendlyByteBuf, SharedWindowInteractionPayload> CODEC = StreamCodec.of(
 		(buf, payload) -> {
 			buf.writeLong(payload.windowHandle);
-			buf.writeVarInt(payload.type().getId());
+			buf.writeVarInt(payload.interactionType.getId());
 			buf.writeDouble(payload.x);
 			buf.writeDouble(payload.y);
 			buf.writeVarInt(payload.button);

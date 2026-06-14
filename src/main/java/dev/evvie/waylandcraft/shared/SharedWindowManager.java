@@ -52,7 +52,7 @@ public class SharedWindowManager {
 	}
 
 	public Collection<Long> getPlayerSubscriptions(UUID playerUUID) {
-		return playerSubscriptions.getOrDefault(playerUUID, Collections.emptySet());
+		return playerSubscriptions.getOrDefault(playerUUID, ConcurrentHashMap.newKeySet());
 	}
 
 	public boolean subscribePlayer(UUID playerUUID, long windowHandle) {

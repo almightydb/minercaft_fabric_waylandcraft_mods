@@ -2,7 +2,6 @@ package dev.evvie.waylandcraft.gui;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.jetbrains.annotations.Nullable;
@@ -11,10 +10,11 @@ import dev.evvie.waylandcraft.WaylandCraft;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler.WindowInfo;
 import dev.evvie.waylandcraft.shared.WindowPermission;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -153,9 +153,9 @@ public class SharedWindowManagerScreen extends Screen {
 	}
 	
 	@Override
-	public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+	public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
 		// 渲染背景
-		this.renderBackground(graphics, mouseX, mouseY, delta);
+		super.extractRenderState(context, mouseX, mouseY, delta);
 		
 		int centerX = this.width / 2;
 		int centerY = this.height / 2;
@@ -163,30 +163,27 @@ public class SharedWindowManagerScreen extends Screen {
 		int listY = centerY - LIST_HEIGHT / 2 - 20;
 		
 		// 渲染标题
-		graphics.drawCenteredString(this.font, this.title, centerX, listY - 40, 0xFFFFFF);
+		context.text(this.font, this.title, centerX - this.font.width(this.title) / 2, listY - 40, 0xFFFFFF);
 		
 		// 渲染搜索框
-		this.searchBox.render(graphics, mouseX, mouseY, delta);
+		this.searchBox.extractRenderState(context, mouseX, mouseY, delta);
 		
 		// 渲染窗口列表背景
-		graphics.fill(listX, listY, listX + LIST_WIDTH, listY + LIST_HEIGHT, 0x80000000);
+		context.fill(listX, listY, listX + LIST_WIDTH, listY + LIST_HEIGHT, 0x80000000);
 		
 		// 渲染窗口列表
-		renderWindowList(graphics, listX, listY, mouseX, mouseY);
-		
-		// 渲染按钮
-		super.render(graphics, mouseX, mouseY, delta);
+		renderWindowList(context, listX, listY, mouseX, mouseY);
 		
 		// 渲染选中窗口的详细信息
 		if(selectedWindow >= 0 && selectedWindow < windowList.size()) {
-			renderWindowDetails(graphics, listX + LIST_WIDTH + 10, listY);
+			renderWindowDetails(context, listX + LIST_WIDTH + 10, listY);
 		}
 	}
 	
 	/**
 	 * 渲染窗口列表
 	 */
-	private void renderWindowList(GuiGraphics graphics, int x, int y, int mouseX, int mouseY) {
+	private void renderWindowList(GuiGraphicsExtractor context, int x, int y, int mouseX, int mouseY) {
 		int itemHeight = 20;
 		int visibleItems = LIST_HEIGHT / itemHeight;
 		
@@ -201,9 +198,9 @@ public class SharedWindowManagerScreen extends Screen {
 			
 			// 渲染选中/悬停背景
 			if(isSelected) {
-				graphics.fill(x, itemY, x + LIST_WIDTH, itemY + itemHeight, 0xFF0000FF);
+				context.fill(x, itemY, x + LIST_WIDTH, itemY + itemHeight, 0xFF0000FF);
 			} else if(isHovered) {
-				graphics.fill(x, itemY, x + LIST_WIDTH, itemY + itemHeight, 0x40FFFFFF);
+				context.fill(x, itemY, x + LIST_WIDTH, itemY + itemHeight, 0x40FFFFFF);
 			}
 			
 			// 渲染窗口信息
@@ -212,41 +209,41 @@ public class SharedWindowManagerScreen extends Screen {
 				title = title.substring(0, 22) + "...";
 			}
 			
-			graphics.drawString(this.font, title, x + 5, itemY + 5, 0xFFFFFF);
+			context.text(this.font, title, x + 5, itemY + 5, 0xFFFFFF);
 			
 			// 渲染权限图标
 			WindowPermission permission = info.permission();
 			int permissionColor = getPermissionColor(permission);
-			graphics.fill(x + LIST_WIDTH - 15, itemY + 5, x + LIST_WIDTH - 5, itemY + 15, permissionColor);
+			context.fill(x + LIST_WIDTH - 15, itemY + 5, x + LIST_WIDTH - 5, itemY + 15, permissionColor);
 		}
 		
 		// 渲染滚动条
 		if(windowList.size() > visibleItems) {
 			int scrollbarHeight = (int)((float)visibleItems / windowList.size() * LIST_HEIGHT);
 			int scrollbarY = y + (int)((float)scrollOffset / windowList.size() * LIST_HEIGHT);
-			graphics.fill(x + LIST_WIDTH - 5, scrollbarY, x + LIST_WIDTH, scrollbarY + scrollbarHeight, 0xFFFFFFFF);
+			context.fill(x + LIST_WIDTH - 5, scrollbarY, x + LIST_WIDTH, scrollbarY + scrollbarHeight, 0xFFFFFFFF);
 		}
 	}
 	
 	/**
 	 * 渲染窗口详细信息
 	 */
-	private void renderWindowDetails(GuiGraphics graphics, int x, int y) {
+	private void renderWindowDetails(GuiGraphicsExtractor context, int x, int y) {
 		WindowInfo info = windowList.get(selectedWindow);
 		
 		// 背景
-		graphics.fill(x, y, x + 200, y + 120, 0x80000000);
+		context.fill(x, y, x + 200, y + 120, 0x80000000);
 		
 		// 详细信息
-		graphics.drawString(this.font, "§l窗口详情", x + 5, y + 5, 0xFFFFFF);
-		graphics.drawString(this.font, "名称: " + info.title(), x + 5, y + 25, 0xCCCCCC);
-		graphics.drawString(this.font, "所有者: " + info.ownerName(), x + 5, y + 40, 0xCCCCCC);
-		graphics.drawString(this.font, "权限: " + info.permission().name(), x + 5, y + 55, 0xCCCCCC);
-		graphics.drawString(this.font, "尺寸: " + info.width() + "x" + info.height(), x + 5, y + 70, 0xCCCCCC);
-		graphics.drawString(this.font, "状态: " + (info.visible() ? "可见" : "隐藏"), x + 5, y + 85, 0xCCCCCC);
+		context.text(this.font, "§l窗口详情", x + 5, y + 5, 0xFFFFFF);
+		context.text(this.font, "名称: " + info.title(), x + 5, y + 25, 0xCCCCCC);
+		context.text(this.font, "所有者: " + info.ownerName(), x + 5, y + 40, 0xCCCCCC);
+		context.text(this.font, "权限: " + info.permission().name(), x + 5, y + 55, 0xCCCCCC);
+		context.text(this.font, "尺寸: " + info.width() + "x" + info.height(), x + 5, y + 70, 0xCCCCCC);
+		context.text(this.font, "状态: " + (info.visible() ? "可见" : "隐藏"), x + 5, y + 85, 0xCCCCCC);
 		
 		// 权限说明
-		graphics.drawString(this.font, "§l权限说明", x + 5, y + 100, 0xFFFF00);
+		context.text(this.font, "§l权限说明", x + 5, y + 100, 0xFFFF00);
 	}
 	
 	/**
@@ -262,8 +259,10 @@ public class SharedWindowManagerScreen extends Screen {
 	}
 	
 	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		if(button == 0) {
+	public boolean mouseClicked(MouseButtonEvent event, boolean isDoubleClick) {
+		if(event.button() == 0) {
+			double mouseX = event.x();
+			double mouseY = event.y();
 			int centerX = this.width / 2;
 			int centerY = this.height / 2;
 			int listX = centerX - LIST_WIDTH / 2;
@@ -282,13 +281,13 @@ public class SharedWindowManagerScreen extends Screen {
 			}
 		}
 		
-		return super.mouseClicked(mouseX, mouseY, button);
+		return super.mouseClicked(event, isDoubleClick);
 	}
 	
 	@Override
-	public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+	public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
 		int maxScroll = Math.max(0, windowList.size() - LIST_HEIGHT / 20);
-		this.scrollOffset = Math.max(0, Math.min(maxScroll, this.scrollOffset - (int)amount));
+		this.scrollOffset = (int)Math.max(0, Math.min(maxScroll, this.scrollOffset - verticalAmount));
 		return true;
 	}
 	

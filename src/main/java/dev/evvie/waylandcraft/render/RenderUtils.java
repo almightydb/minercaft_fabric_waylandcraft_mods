@@ -194,7 +194,17 @@ public class RenderUtils {
 	}
 	
 	/**
-	 * 渲染远程纹理
+	 * 渲染远程纹理（通过Identifier）
+	 */
+	public static void renderRemoteTexture(Identifier textureLocation, PoseStack poseStack, SubmitNodeCollector collector,
+			Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) {
+		if(textureLocation == null) return;
+		collector.submitCustomGeometry(poseStack, REMOTE_TEXTURE.apply(textureLocation),
+			new RemoteTextureRenderInstance(tl, bl, br, tr));
+	}
+
+	/**
+	 * 渲染远程纹理（通过textureId，兼容旧接口）
 	 */
 	public static void renderRemoteTexture(int textureId, PoseStack poseStack, SubmitNodeCollector collector, 
 			Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) {

@@ -1,6 +1,5 @@
 package dev.evvie.waylandcraft.shared;
 
-import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -10,7 +9,11 @@ import org.slf4j.LoggerFactory;
 
 import com.mojang.blaze3d.platform.NativeImage;
 
+import dev.evvie.waylandcraft.WaylandCraftCommon;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.client.renderer.texture.TextureManager;
+import net.minecraft.resources.Identifier;
 
 public class RemoteWindowRenderer {
 	
@@ -31,6 +34,13 @@ public class RemoteWindowRenderer {
 	}
 	
 	/**
+	 * 获取纹理位置标识符
+	 */
+	private Identifier getTextureLocation(long windowHandle) {
+		return Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "remote_" + windowHandle);
+	}
+	
+	/**
 	 * 更新远程窗口纹理
 	 */
 	public void updateTexture(long windowHandle, int x, int y, int width, int height, byte[] jpegData) {
@@ -43,13 +53,20 @@ public class RemoteWindowRenderer {
 			if(entry == null) return;
 		}
 		
-		// 解码JPEG数据并更新纹理
+		// 解码数据并更新纹理
 		try {
-			NativeImage image = decodeJpeg(jpegData, width, height);
+			NativeImage image = decodeImageData(jpegData, width, height);
 			if(image != null) {
-				entry.texture.upload();
+				// 用新图像数据替换DynamicTexture的NativeImage
+				entry.texture.close();
+				DynamicTexture newTexture = new DynamicTexture(() -> "remote_window_" + Long.toHexString(windowHandle), image);
+				entry.texture = newTexture;
+				
+				// 重新注册到TextureManager
+				TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+				textureManager.register(entry.location, newTexture);
+				
 				entry.lastUpdate = System.currentTimeMillis();
-				image.close();
 			}
 		} catch(Exception e) {
 			LOGGER.error("Failed to update texture for window 0x{}", Long.toHexString(windowHandle), e);
@@ -70,7 +87,11 @@ public class RemoteWindowRenderer {
 			NativeImage image = new NativeImage(width, height, false);
 			DynamicTexture texture = new DynamicTexture(() -> "remote_window_" + Long.toHexString(windowHandle), image);
 			
-			TextureEntry entry = new TextureEntry(texture, width, height);
+			Identifier location = getTextureLocation(windowHandle);
+			TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+			textureManager.register(location, texture);
+			
+			TextureEntry entry = new TextureEntry(texture, location, width, height);
 			textureCache.put(windowHandle, entry);
 			
 			LOGGER.debug("Created texture for window 0x{} ({}x{})", Long.toHexString(windowHandle), width, height);
@@ -87,20 +108,19 @@ public class RemoteWindowRenderer {
 	public void destroyTexture(long windowHandle) {
 		TextureEntry entry = textureCache.remove(windowHandle);
 		if(entry != null) {
-			entry.texture.close();
+			TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+			textureManager.release(entry.location);
 			LOGGER.debug("Destroyed texture for window 0x{}", Long.toHexString(windowHandle));
 		}
 	}
 	
 	/**
-	 * 获取纹理ID用于渲染
+	 * 获取纹理位置用于渲染
 	 */
-	public int getTextureId(long windowHandle) {
+	@Nullable
+	public Identifier getTextureLocation_obj(long windowHandle) {
 		TextureEntry entry = textureCache.get(windowHandle);
-		if(entry != null) {
-			return entry.texture.getId();
-		}
-		return -1;
+		return entry != null ? entry.location : null;
 	}
 	
 	/**
@@ -111,32 +131,31 @@ public class RemoteWindowRenderer {
 	}
 	
 	/**
-	 * 解码JPEG数据
+	 * 解码图像数据并填充到NativeImage
 	 */
 	@Nullable
-	private NativeImage decodeJpeg(byte[] jpegData, int width, int height) {
+	private NativeImage decodeImageData(byte[] data, int width, int height) {
 		try {
-			// 创建NativeImage并填充数据
 			NativeImage image = new NativeImage(width, height, false);
 			
-			// 简化实现：直接填充纹理数据
-			// 实际实现需要使用JPEG解码器
+			// 填充像素数据
 			for(int y = 0; y < height; y++) {
 				for(int x = 0; x < width; x++) {
 					int index = (y * width + x) * 3; // RGB格式
-					if(index + 2 < jpegData.length) {
-						int r = jpegData[index] & 0xFF;
-						int g = jpegData[index + 1] & 0xFF;
-						int b = jpegData[index + 2] & 0xFF;
+					if(index + 2 < data.length) {
+						int r = data[index] & 0xFF;
+						int g = data[index + 1] & 0xFF;
+						int b = data[index + 2] & 0xFF;
 						int a = 255;
-						image.setPixelRGBA(x, y, (a << 24) | (b << 16) | (g << 8) | r);
+						// ABGR格式: Alpha in highest byte, then B, G, R
+						image.setPixelABGR(x, y, (a << 24) | (b << 16) | (g << 8) | r);
 					}
 				}
 			}
 			
 			return image;
 		} catch(Exception e) {
-			LOGGER.error("Failed to decode JPEG data", e);
+			LOGGER.error("Failed to decode image data", e);
 			return null;
 		}
 	}
@@ -150,7 +169,8 @@ public class RemoteWindowRenderer {
 		
 		textureCache.entrySet().removeIf(entry -> {
 			if(now - entry.getValue().lastUpdate > threshold) {
-				entry.getValue().texture.close();
+				TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+				textureManager.release(entry.getValue().location);
 				LOGGER.debug("Cleaned up old texture for window 0x{}", Long.toHexString(entry.getKey()));
 				return true;
 			}
@@ -173,7 +193,8 @@ public class RemoteWindowRenderer {
 	 * 清理所有纹理
 	 */
 	public void clear() {
-		textureCache.values().forEach(entry -> entry.texture.close());
+		TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+		textureCache.values().forEach(entry -> textureManager.release(entry.location));
 		textureCache.clear();
 		LOGGER.info("RemoteWindowRenderer cleared");
 	}
@@ -182,13 +203,15 @@ public class RemoteWindowRenderer {
 	 * 纹理条目
 	 */
 	private static class TextureEntry {
-		final DynamicTexture texture;
+		DynamicTexture texture;
+		final Identifier location;
 		final int width;
 		final int height;
 		long lastUpdate;
 		
-		TextureEntry(DynamicTexture texture, int width, int height) {
+		TextureEntry(DynamicTexture texture, Identifier location, int width, int height) {
 			this.texture = texture;
+			this.location = location;
 			this.width = width;
 			this.height = height;
 			this.lastUpdate = System.currentTimeMillis();

@@ -43,7 +43,7 @@ public class InteractionForwarder {
 		
 		// 获取窗口所有者
 		UUID ownerUUID = entry.getOwnerUUID();
-		ServerPlayer owner = sender.server.getPlayerList().getPlayer(ownerUUID);
+		ServerPlayer owner = sender.level().getServer().getPlayerList().getPlayer(ownerUUID);
 		if(owner == null) {
 			LOGGER.debug("Window owner {} is offline, ignoring interaction", ownerUUID);
 			return;

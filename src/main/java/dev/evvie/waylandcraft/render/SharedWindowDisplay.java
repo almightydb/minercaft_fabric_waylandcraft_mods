@@ -12,6 +12,7 @@ import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import dev.evvie.waylandcraft.shared.WindowPermission;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.Camera;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -196,8 +197,8 @@ public class SharedWindowDisplay {
 		if(!visible) return;
 		if(!renderer.hasTexture(windowHandle)) return;
 		
-		int textureId = renderer.getTextureId(windowHandle);
-		if(textureId < 0) return;
+		Identifier textureLocation = renderer.getTextureLocation_obj(windowHandle);
+		if(textureLocation == null) return;
 		
 		// 获取渲染所需的各种向量
 		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
@@ -218,7 +219,7 @@ public class SharedWindowDisplay {
 		poseStack.translate(originRel.x, originRel.y, originRel.z);
 		
 		// 使用RenderUtils渲染纹理
-		RenderUtils.renderRemoteTexture(textureId, poseStack, ctx.submitNodeCollector(), tl, bl, br, tr);
+		RenderUtils.renderRemoteTexture(textureLocation, poseStack, ctx.submitNodeCollector(), tl, bl, br, tr);
 		
 		poseStack.popPose();
 	}
