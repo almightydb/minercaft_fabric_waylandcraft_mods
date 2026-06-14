@@ -11,7 +11,9 @@ import dev.evvie.waylandcraft.network.ServerEventHandler;
 import dev.evvie.waylandcraft.network.WaylandCraftNetworking;
 import dev.evvie.waylandcraft.shared.SharedWindowManager;
 import dev.evvie.waylandcraft.shared.PermissionManager;
+import dev.evvie.waylandcraft.command.PermissionCommand;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.server.MinecraftServer;
@@ -38,6 +40,11 @@ public class WaylandCraftCommon implements ModInitializer {
 		
 		// 注册服务器事件处理器
 		ServerEventHandler.register();
+		
+		// 注册命令
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+			PermissionCommand.register(dispatcher);
+		});
 		
 		ServerTickEvents.START_LEVEL_TICK.register(serverItemManager);
 		
