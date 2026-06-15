@@ -42,6 +42,11 @@ public class ImageCapture {
 	private static final int MAX_WIDTH = 1920;
 	private static final int MAX_HEIGHT = 1080;
 	
+	// 可复用的ByteBuffer，避免每帧分配
+	private static ByteBuffer reusableBuffer = null;
+	private static int lastBufferWidth = 0;
+	private static int lastBufferHeight = 0;
+	
 	/**
 	 * 从当前OpenGL framebuffer捕获图像
 	 * @param x 起始X坐标
@@ -141,15 +146,42 @@ public class ImageCapture {
 				GL11.GL_TEXTURE_2D, glTexId, 0
 			);
 			
-			ByteBuffer buffer = ByteBuffer.allocateDirect(width * height * 4);
-			GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
+			// FBO完整性检查
+			int status = org.lwjgl.opengl.GL30.glCheckFramebufferStatus(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER);
+			if(status != org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_COMPLETE) {
+				LOGGER.error("FBO incomplete: 0x{}", Integer.toHexString(status));
+				org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
+				org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
+				return null;
+			}
+			
+			// 复用ByteBuffer
+			int needed = width * height * 4;
+			if(reusableBuffer == null || lastBufferWidth != width || lastBufferHeight != height) {
+				reusableBuffer = ByteBuffer.allocateDirect(needed);
+				lastBufferWidth = width;
+				lastBufferHeight = height;
+			} else {
+				reusableBuffer.clear();
+			}
+			
+			GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, reusableBuffer);
+			
+			// GL错误检查
+			int glError = GL11.glGetError();
+			if(glError != GL11.GL_NO_ERROR) {
+				LOGGER.error("glReadPixels error: 0x{}", Integer.toHexString(glError));
+				org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
+				org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
+				return null;
+			}
 			
 			// 清理临时 FBO
 			org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
 			org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
 			
 			// 转换为 BufferedImage
-			BufferedImage image = pixelBufferToImage(buffer, width, height);
+			BufferedImage image = pixelBufferToImage(reusableBuffer, width, height);
 			
 			// 缩放
 			if(scale != 1.0f) {

@@ -44,6 +44,10 @@ public class ServerEventHandler {
 		UUID playerUUID = player.getUUID();
 		LOGGER.info("Player {} joined server", playerUUID);
 		
+		// 给新玩家授予所有已注册窗口的VIEW权限
+		SharedWindowManager manager = WaylandCraftCommon.instance.sharedWindowManager;
+		manager.grantViewToNewPlayer(playerUUID);
+		
 		// 发送当前共享窗口列表给新加入的玩家
 		sendWindowListToPlayer(player);
 	}

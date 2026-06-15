@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.jetbrains.annotations.Nullable;
 
+import dev.evvie.waylandcraft.WaylandCraftCommon;
 import dev.evvie.waylandcraft.bridge.WLCToplevel;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -29,6 +30,17 @@ public class SharedWindowEntry {
 		this.createdAt = System.currentTimeMillis();
 
 		this.permissions.put(ownerUUID, WindowPermission.CONTROL);
+
+		// 给所有在线玩家默认VIEW权限
+		var server = WaylandCraftCommon.instance.server;
+		if (server != null) {
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				UUID uuid = player.getUUID();
+				if (!uuid.equals(ownerUUID)) {
+					this.permissions.put(uuid, WindowPermission.VIEW);
+				}
+			}
+		}
 	}
 
 	public long getWindowHandle() {

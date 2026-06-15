@@ -49,10 +49,8 @@ public class InteractionForwarder {
 			return;
 		}
 		
-		// 转发交互给所有者
-		// 注意：这里需要修改payload以包含发送者信息
-		// 目前直接转发原始payload
-		ServerPlayNetworking.send(owner, payload);
+		// 转发交互给所有者，附带发送者UUID
+		ServerPlayNetworking.send(owner, payload.withSender(senderUUID));
 		
 		LOGGER.debug("Forwarded interaction from player {} to window owner {} for window 0x{}", 
 			senderUUID, ownerUUID, Long.toHexString(payload.windowHandle()));
@@ -65,7 +63,7 @@ public class InteractionForwarder {
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
 			windowHandle,
 			SharedWindowInteractionPayload.InteractionType.MOUSE_MOVE,
-			x, y, 0, 0
+			x, y, 0, 0, null
 		);
 		forwardInteraction(payload, sender);
 	}
@@ -77,7 +75,7 @@ public class InteractionForwarder {
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
 			windowHandle,
 			SharedWindowInteractionPayload.InteractionType.MOUSE_CLICK,
-			x, y, button, 0
+			x, y, button, 0, null
 		);
 		forwardInteraction(payload, sender);
 	}
@@ -89,7 +87,7 @@ public class InteractionForwarder {
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
 			windowHandle,
 			SharedWindowInteractionPayload.InteractionType.MOUSE_RELEASE,
-			x, y, button, 0
+			x, y, button, 0, null
 		);
 		forwardInteraction(payload, sender);
 	}
@@ -101,7 +99,7 @@ public class InteractionForwarder {
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
 			windowHandle,
 			SharedWindowInteractionPayload.InteractionType.KEY_PRESS,
-			0, 0, key, modifiers
+			0, 0, key, modifiers, null
 		);
 		forwardInteraction(payload, sender);
 	}
@@ -113,7 +111,7 @@ public class InteractionForwarder {
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
 			windowHandle,
 			SharedWindowInteractionPayload.InteractionType.KEY_RELEASE,
-			0, 0, key, modifiers
+			0, 0, key, modifiers, null
 		);
 		forwardInteraction(payload, sender);
 	}
@@ -127,7 +125,7 @@ public class InteractionForwarder {
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
 			windowHandle,
 			SharedWindowInteractionPayload.InteractionType.SCROLL,
-			x, y, scrollData, 0
+			x, y, scrollData, 0, null
 		);
 		forwardInteraction(payload, sender);
 	}

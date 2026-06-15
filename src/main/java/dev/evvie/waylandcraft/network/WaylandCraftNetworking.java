@@ -60,20 +60,12 @@ public class WaylandCraftNetworking {
 		
 		// 处理客户端请求注册共享窗口
 		ServerPlayNetworking.registerGlobalReceiver(SharedWindowRegisterPayload.TYPE, (payload, ctx) -> {
-			ServerPlayer player = ctx.player();
-			UUID playerUUID = player.getUUID();
-			
-			SharedWindowManager manager = WaylandCraftCommon.instance.sharedWindowManager;
-			
-			// 注册窗口
-			SharedWindowEntry entry = manager.registerWindow(
-				payload.windowHandle(),
-				playerUUID,
-				payload.windowTitle()
-			);
-			
-			// 广播窗口列表给所有订阅者
-			broadcastWindowList(manager, player);
+			SharedWindowServerHandler.handleWindowRegister(payload, ctx.player());
+		});
+		
+		// 处理客户端请求注销共享窗口
+		ServerPlayNetworking.registerGlobalReceiver(SharedWindowUnregisterPayload.TYPE, (payload, ctx) -> {
+			SharedWindowServerHandler.handleWindowUnregister(payload.windowHandle(), ctx.player());
 		});
 		
 		// 处理权限管理命令

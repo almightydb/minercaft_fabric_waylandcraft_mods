@@ -1,5 +1,6 @@
 package dev.evvie.waylandcraft.command;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -408,13 +409,24 @@ public class WaylandCraftCommand {
 					return;
 				}
 				
-				sendChat(source, "[TEST] Launching firefox on " + socketPath + "...");
-				
-				ProcessBuilder pb = new ProcessBuilder("firefox");
-				pb.environment().put("WAYLAND_DISPLAY", socketPath);
-				pb.environment().put("GDK_BACKEND", "wayland");
-				pb.redirectErrorStream(true);
-				Process proc = pb.start();
+			sendChat(source, "[TEST] Launching firefox on " + socketPath + "...");
+			
+			// 使用 --no-remote + 临时profile强制新实例连到WaylandCraft socket
+			String tmpProfile = "/tmp/wlc-test-profile-" + System.currentTimeMillis();
+			new File(tmpProfile).mkdirs();
+			
+			ProcessBuilder pb = new ProcessBuilder(
+				"firefox", "--new-instance", "--no-remote",
+				"-profile", tmpProfile,
+				"--width", "800", "--height", "600",
+				"about:blank"
+			);
+			pb.environment().put("WAYLAND_DISPLAY", socketPath);
+			pb.environment().put("GDK_BACKEND", "wayland");
+			pb.environment().put("MOZ_ENABLE_WAYLAND", "1");
+			pb.environment().put("DISPLAY", ""); // 禁止X11回退
+			pb.redirectErrorStream(true);
+			Process proc = pb.start();
 				
 				sendChat(source, "[TEST] Firefox launched, waiting for window...");
 				

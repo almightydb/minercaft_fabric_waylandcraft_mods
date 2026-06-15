@@ -75,6 +75,7 @@ public class RemoteWindowRenderer {
 		
 		// 更新纹理
 		try {
+			// 创建新纹理并注册（DynamicTexture内部复用NativeImage生命周期）
 			entry.texture.close();
 			DynamicTexture newTexture = new DynamicTexture(() -> "remote_window_" + Long.toHexString(windowHandle), image);
 			entry.texture = newTexture;

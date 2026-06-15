@@ -120,11 +120,11 @@ public class FrameRateController {
 	 */
 	public int adjustFpsByDiff(int currentFps, float diffPercent) {
 		if(diffPercent > 0.5f) {
-			// 大量变化：降低帧率
-			return Math.max(MIN_FPS, currentFps - 5);
+			// 大量变化：提高帧率以跟上更新
+			return Math.min(MAX_FPS, currentFps + 5);
 		} else if(diffPercent < 0.1f) {
-			// 少量变化：提高帧率
-			return Math.min(MAX_FPS, currentFps + 2);
+			// 几乎无变化：降低帧率节省带宽
+			return Math.max(MIN_FPS, currentFps - 2);
 		}
 		return currentFps;
 	}

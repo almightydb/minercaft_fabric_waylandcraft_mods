@@ -224,8 +224,9 @@ public class SharedWindowClientHandler {
 	 */
 	public static void sendInteraction(long windowHandle, SharedWindowInteractionPayload.InteractionType type, 
 			double x, double y, int button, int key) {
+		UUID senderUUID = Minecraft.getInstance().player != null ? Minecraft.getInstance().player.getUUID() : null;
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
-			windowHandle, type, x, y, button, key
+			windowHandle, type, x, y, button, key, senderUUID
 		);
 		ClientPlayNetworking.send(payload);
 	}

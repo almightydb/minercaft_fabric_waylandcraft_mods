@@ -131,6 +131,18 @@ public class SharedWindowManager {
 		return entry.hasPermission(playerUUID, WindowPermission.INTERACT);
 	}
 
+	/**
+	 * 给新加入的玩家授予所有已注册窗口的VIEW权限
+	 */
+	public void grantViewToNewPlayer(UUID playerUUID) {
+		for (SharedWindowEntry entry : windowRegistry.values()) {
+			if (!entry.getOwnerUUID().equals(playerUUID)) {
+				entry.setPermission(playerUUID, WindowPermission.VIEW);
+			}
+		}
+		LOGGER.info("Granted VIEW permission to new player {} for {} windows", playerUUID, windowRegistry.size());
+	}
+
 	public int getWindowCount() {
 		return windowRegistry.size();
 	}
