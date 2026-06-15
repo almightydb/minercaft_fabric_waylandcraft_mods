@@ -120,11 +120,19 @@ public class SharedWindowClientHandler {
 	private static void handleWindowImageUpdate(SharedWindowImagePayload payload) {
 		WindowInfo info = remoteWindows.get(payload.windowHandle());
 		if(info == null) {
+			LOGGER.warn("[CLIENT] received image for unknown window 0x{} (remoteWindows has {} entries)", 
+				Long.toHexString(payload.windowHandle()), remoteWindows.size());
 			return;
 		}
 		
+		LOGGER.info("[CLIENT] received image for window 0x{}: {} bytes, {}x{}", 
+			Long.toHexString(payload.windowHandle()), payload.imageData().length, payload.width(), payload.height());
+		
 		// 更新图像数据
 		info.updateImage(payload.imageData(), payload.width(), payload.height());
+		
+		// 更新所有者世界坐标
+		info.updateOwnerPos(payload.posX(), payload.posY(), payload.posZ());
 		
 		// 更新RemoteWindowRenderer
 		WaylandCraft instance = WaylandCraft.instance;
@@ -136,6 +144,9 @@ public class SharedWindowClientHandler {
 				payload.imageData()
 			);
 		}
+		
+		// 更新SharedWindowDisplay位置
+		updateSharedDisplay(info);
 	}
 	
 	/**
@@ -194,6 +205,8 @@ public class SharedWindowClientHandler {
 				display.updatePosition(info.x(), info.y());
 				display.updateSize(info.width(), info.height());
 				display.setVisible(info.visible());
+				// 更新所有者世界坐标
+				display.setWorldPosition(info.ownerPosX(), info.ownerPosY(), info.ownerPosZ());
 				break;
 			}
 		}
@@ -261,6 +274,8 @@ public class SharedWindowClientHandler {
 		private byte[] imageData;
 		private int imageWidth, imageHeight;
 		
+		private double ownerPosX, ownerPosY, ownerPosZ;
+		
 		public WindowInfo(long windowHandle, UUID ownerUUID, String title, WindowPermission permission) {
 			this.windowHandle = windowHandle;
 			this.ownerUUID = ownerUUID;
@@ -306,5 +321,15 @@ public class SharedWindowClientHandler {
 			this.imageWidth = width;
 			this.imageHeight = height;
 		}
+		
+		public void updateOwnerPos(double x, double y, double z) {
+			this.ownerPosX = x;
+			this.ownerPosY = y;
+			this.ownerPosZ = z;
+		}
+		
+		public double ownerPosX() { return ownerPosX; }
+		public double ownerPosY() { return ownerPosY; }
+		public double ownerPosZ() { return ownerPosZ; }
 	}
 }

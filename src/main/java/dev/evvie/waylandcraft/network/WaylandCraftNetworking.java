@@ -84,16 +84,22 @@ public class WaylandCraftNetworking {
 			SharedWindowManager manager = WaylandCraftCommon.instance.sharedWindowManager;
 			SharedWindowEntry entry = manager.getWindow(payload.windowHandle());
 			if(entry == null || !entry.getOwnerUUID().equals(senderUUID)) {
+				WaylandCraftCommon.LOGGER.warn("[SERVER] image rejected: entry={}, owner match={}", 
+					entry != null, entry != null && entry.getOwnerUUID().equals(senderUUID));
 				return;
 			}
 			
 			// 转发给所有其他有VIEW权限的在线玩家
+			int forwarded = 0;
 			for(ServerPlayer player : sender.level().getServer().getPlayerList().getPlayers()) {
 				if(player.getUUID().equals(senderUUID)) continue;
 				if(entry.hasPermission(player.getUUID(), WindowPermission.VIEW)) {
 					ServerPlayNetworking.send(player, payload);
+					forwarded++;
 				}
 			}
+			WaylandCraftCommon.LOGGER.info("[SERVER] forwarded image from {} to {} players ({} bytes)", 
+				senderUUID, forwarded, payload.imageData().length);
 		});
 		
 		ServerPlayNetworking.registerGlobalReceiver(SharedWindowInteractionPayload.TYPE, (payload, ctx) -> {

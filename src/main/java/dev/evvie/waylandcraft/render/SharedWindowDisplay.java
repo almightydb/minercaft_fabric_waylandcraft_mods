@@ -111,6 +111,13 @@ public class SharedWindowDisplay {
 	}
 	
 	/**
+	 * 设置所有者世界坐标（窗口显示在该位置）
+	 */
+	public void setWorldPosition(double x, double y, double z) {
+		this.pivot = new Vec3(x, y, z);
+	}
+	
+	/**
 	 * 更新窗口大小
 	 */
 	public void updateSize(int width, int height) {

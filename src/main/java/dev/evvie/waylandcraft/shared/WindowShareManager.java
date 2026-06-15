@@ -157,14 +157,25 @@ public class WindowShareManager {
 		
 		// 获取本地窗口
 		WLCToplevel toplevel = getLocalWindow(state.windowHandle);
-		if(toplevel == null || !toplevel.isMapped()) {
+		if(toplevel == null) {
+			LOGGER.warn("[SHARE] toplevel is null for handle 0x{}", Long.toHexString(state.windowHandle));
+			return;
+		}
+		if(!toplevel.isMapped()) {
+			LOGGER.warn("[SHARE] toplevel not mapped for handle 0x{}", Long.toHexString(state.windowHandle));
 			return;
 		}
 		
 		// 捕获窗口图像 - 从窗口的framebuffer读取
 		if(toplevel.framebuffer == null) {
+			LOGGER.warn("[SHARE] framebuffer is null for handle 0x{}", Long.toHexString(state.windowHandle));
 			return;
 		}
+		
+		LOGGER.info("[SHARE] capturing window 0x{} ({}x{})", 
+			Long.toHexString(state.windowHandle),
+			toplevel.framebuffer.getWidth(), toplevel.framebuffer.getHeight());
+		
 		byte[] imageData = ImageCapture.captureFromFramebuffer(
 			toplevel.framebuffer,
 			captureConfig.scale,
@@ -172,24 +183,41 @@ public class WindowShareManager {
 		);
 		
 		if(imageData == null) {
+			LOGGER.error("[SHARE] ImageCapture returned null!");
 			return;
 		}
+		
+		LOGGER.info("[SHARE] captured {} bytes JPEG", imageData.length);
 		
 		// 处理差分更新
 		byte[] processedData = diffUpdateManager.processFrame(state.windowHandle, imageData);
 		if(processedData == null) {
+			LOGGER.warn("[SHARE] DiffUpdateManager returned null");
 			return;
 		}
 		
 		// 发送图像数据到服务器（使用缩放后的尺寸）
 		int scaledW = (int)(toplevel.geometry.width() * captureConfig.scale);
 		int scaledH = (int)(toplevel.geometry.height() * captureConfig.scale);
+		
+		// 获取玩家世界坐标
+		double posX = 0, posY = 0, posZ = 0;
+		var player = Minecraft.getInstance().player;
+		if(player != null) {
+			posX = player.getX();
+			posY = player.getY();
+			posZ = player.getZ();
+		}
+		
 		SharedWindowImagePayload imagePayload = new SharedWindowImagePayload(
 			state.windowHandle, 0, 0, 0,
 			scaledW, scaledH,
-			processedData
+			processedData,
+			posX, posY, posZ
 		);
 		ClientPlayNetworking.send(imagePayload);
+		
+		LOGGER.info("[SHARE] sent image payload: {} bytes, {}x{}", processedData.length, scaledW, scaledH);
 		
 		// 更新统计信息
 		state.lastUpdateTime = System.currentTimeMillis();

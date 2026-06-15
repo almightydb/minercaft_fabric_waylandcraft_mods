@@ -245,11 +245,17 @@ public class ImageCapture {
 	}
 	
 	/**
-	 * 压缩图像为JPEG格式
+	 * 压缩图像为JPEG格式（ARGB→RGB转换）
 	 */
 	@Nullable
 	public static byte[] compressToJpeg(BufferedImage image, float quality) {
 		try {
+			// JPEG不支持alpha通道，需要转为RGB
+			BufferedImage rgbImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+			java.awt.Graphics2D g2d = rgbImage.createGraphics();
+			g2d.drawImage(image, 0, 0, null);
+			g2d.dispose();
+			
 			ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 			
 			ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
@@ -262,7 +268,7 @@ public class ImageCapture {
 			// 写入JPEG数据
 			ImageOutputStream imageOutputStream = new MemoryCacheImageOutputStream(outputStream);
 			writer.setOutput(imageOutputStream);
-			writer.write(null, new IIOImage(image, null, null), param);
+			writer.write(null, new IIOImage(rgbImage, null, null), param);
 			writer.dispose();
 			imageOutputStream.close();
 			

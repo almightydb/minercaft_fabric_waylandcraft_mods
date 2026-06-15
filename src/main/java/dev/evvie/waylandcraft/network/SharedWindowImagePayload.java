@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
-public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x, int y, int width, int height, byte[] imageData) implements CustomPacketPayload {
+public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x, int y, int width, int height, byte[] imageData, double posX, double posY, double posZ) implements CustomPacketPayload {
 	
 	public static final Identifier ID = Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "shared_window_image");
 	
@@ -22,6 +22,9 @@ public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x
 			buf.writeVarInt(payload.height);
 			buf.writeVarInt(payload.imageData.length);
 			buf.writeBytes(payload.imageData);
+			buf.writeDouble(payload.posX);
+			buf.writeDouble(payload.posY);
+			buf.writeDouble(payload.posZ);
 		},
 		buf -> {
 			long windowHandle = buf.readLong();
@@ -33,7 +36,10 @@ public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x
 			int dataLength = buf.readVarInt();
 			byte[] imageData = new byte[dataLength];
 			buf.readBytes(imageData);
-			return new SharedWindowImagePayload(windowHandle, frameNumber, x, y, width, height, imageData);
+			double posX = buf.readDouble();
+			double posY = buf.readDouble();
+			double posZ = buf.readDouble();
+			return new SharedWindowImagePayload(windowHandle, frameNumber, x, y, width, height, imageData, posX, posY, posZ);
 		}
 	);
 	
