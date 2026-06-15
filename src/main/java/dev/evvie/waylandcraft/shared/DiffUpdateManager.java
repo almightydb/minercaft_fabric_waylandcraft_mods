@@ -23,46 +23,13 @@ public class DiffUpdateManager {
 	
 	/**
 	 * 处理帧更新
-	 * @param windowHandle 窗口句柄
-	 * @param newFrame 新帧数据
-	 * @return 差分数据，如果是关键帧则返回完整数据
+	 * 对于JPEG压缩数据，差分无意义（JPEG编码不确定性），直接透传
 	 */
 	@Nullable
 	public byte[] processFrame(long windowHandle, byte[] newFrame) {
-		FrameCache cache = frameCacheMap.computeIfAbsent(windowHandle, k -> new FrameCache());
-		
-		// 第一帧或缓存为空，发送完整帧
-		if(cache.lastFrame == null) {
-			cache.lastFrame = newFrame;
-			cache.frameCount++;
-			return newFrame;
-		}
-		
-		// 计算差异
-		float diffPercent = calculateDiffPercent(cache.lastFrame, newFrame);
-		
-		// 如果差异超过阈值，发送完整帧
-		if(diffPercent > 0.3f) {
-			cache.lastFrame = newFrame;
-			cache.frameCount++;
-			cache.keyFrameCount++;
-			return newFrame;
-		}
-		
-		// 生成差分数据
-		byte[] diffData = generateDiff(cache.lastFrame, newFrame);
-		
-		// 更新缓存
-		cache.lastFrame = newFrame;
-		cache.frameCount++;
-		
-		// 如果差分数据比原始数据大，发送完整帧
-		if(diffData.length >= newFrame.length) {
-			cache.keyFrameCount++;
-			return newFrame;
-		}
-		
-		return diffData;
+		// JPEG已压缩，diffing compressed data is meaningless
+		// 直接返回完整帧
+		return newFrame;
 	}
 	
 	/**

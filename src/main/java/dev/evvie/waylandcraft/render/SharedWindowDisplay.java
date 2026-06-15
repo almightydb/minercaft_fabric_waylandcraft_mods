@@ -200,6 +200,19 @@ public class SharedWindowDisplay {
 		Identifier textureLocation = renderer.getTextureLocation_obj(windowHandle);
 		if(textureLocation == null) return;
 		
+		// 从renderer获取实际纹理尺寸（首次渲染时本地width/height可能为0）
+		int renderWidth = this.width;
+		int renderHeight = this.height;
+		if(renderWidth <= 0 || renderHeight <= 0) {
+			int[] dims = renderer.getTextureDimensions(windowHandle);
+			if(dims != null && dims[0] > 0 && dims[1] > 0) {
+				renderWidth = dims[0];
+				renderHeight = dims[1];
+			} else {
+				return;
+			}
+		}
+		
 		// 获取渲染所需的各种向量
 		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
 		Vec3 originRel = origin().subtract(cameraPos);
@@ -209,9 +222,9 @@ public class SharedWindowDisplay {
 		
 		// 计算四个角的位置
 		Vec3 tl = new Vec3(0, 0, 0);
-		Vec3 bl = localY.scale(height);
-		Vec3 br = bl.add(localX.scale(width));
-		Vec3 tr = localX.scale(width);
+		Vec3 bl = localY.scale(renderHeight);
+		Vec3 br = bl.add(localX.scale(renderWidth));
+		Vec3 tr = localX.scale(renderWidth);
 		
 		// 渲染纹理
 		PoseStack poseStack = ctx.poseStack();

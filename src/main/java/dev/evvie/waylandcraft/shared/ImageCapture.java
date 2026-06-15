@@ -17,6 +17,11 @@ import org.jetbrains.annotations.Nullable;
 import org.lwjgl.opengl.GL11;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTexture;
+
 import dev.evvie.waylandcraft.render.WindowFramebuffer;
 
 /**
@@ -104,14 +109,62 @@ public class ImageCapture {
 	@Nullable
 	public static byte[] captureFromFramebuffer(WindowFramebuffer framebuffer, float scale, float quality) {
 		if(!framebuffer.isValid()) {
-			LOGGER.warn("Attempted to capture invalid framebuffer");
+			return null;
+		}
+		
+		var target = framebuffer.getRenderTarget();
+		if(target == null) {
 			return null;
 		}
 		
 		int width = framebuffer.getWidth();
 		int height = framebuffer.getHeight();
 		
-		return captureFramebuffer(0, 0, width, height, scale, quality);
+		if(width <= 0 || height <= 0) {
+			return null;
+		}
+		
+		var colorTex = target.getColorTexture();
+		if(colorTex == null || colorTex.isClosed()) {
+			return null;
+		}
+		
+		try {
+			// 通过 GlTexture 获取 GL 纹理 ID，创建临时 FBO 读取像素
+			int glTexId = ((com.mojang.blaze3d.opengl.GlTexture) colorTex).glId();
+			
+			int tempFbo = org.lwjgl.opengl.GL30.glGenFramebuffers();
+			org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, tempFbo);
+			org.lwjgl.opengl.GL30.glFramebufferTexture2D(
+				org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER,
+				org.lwjgl.opengl.GL30.GL_COLOR_ATTACHMENT0,
+				GL11.GL_TEXTURE_2D, glTexId, 0
+			);
+			
+			ByteBuffer buffer = ByteBuffer.allocateDirect(width * height * 4);
+			GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
+			
+			// 清理临时 FBO
+			org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
+			org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
+			
+			// 转换为 BufferedImage
+			BufferedImage image = pixelBufferToImage(buffer, width, height);
+			
+			// 缩放
+			if(scale != 1.0f) {
+				int scaledW = (int)(width * scale);
+				int scaledH = (int)(height * scale);
+				if(scaledW > 0 && scaledH > 0) {
+					image = scaleImage(image, scaledW, scaledH);
+				}
+			}
+			
+			return compressToJpeg(image, quality);
+		} catch(Exception e) {
+			LOGGER.error("Failed to capture from framebuffer", e);
+			return null;
+		}
 	}
 	
 	/**

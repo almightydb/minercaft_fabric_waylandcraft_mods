@@ -35,6 +35,7 @@ import dev.evvie.waylandcraft.render.WindowInHandRenderer;
 import dev.evvie.waylandcraft.render.WindowInItemFrameRenderer;
 import dev.evvie.waylandcraft.render.model.WindowItemModel;
 import dev.evvie.waylandcraft.render.SharedWindowDisplay;
+import dev.evvie.waylandcraft.shared.WindowShareManager;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettings;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettingsManager;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
@@ -86,6 +87,7 @@ public class WaylandCraft implements ClientModInitializer {
 	// 多人显示功能
 	public RemoteWindowRenderer remoteWindowRenderer = new RemoteWindowRenderer();
 	public ArrayList<SharedWindowDisplay> sharedDisplays = new ArrayList<SharedWindowDisplay>();
+	public WindowShareManager windowShareManager;
 	
 	public WindowItemManager itemManager = new WindowItemManager();
 	public XDGDesktopManager xdgManager;
@@ -137,6 +139,9 @@ public class WaylandCraft implements ClientModInitializer {
 		WindowItemModel.register();
 		hudRenderer.register();
 		SharedWindowClientHandler.register();
+		
+		// 初始化窗口共享管理器
+		windowShareManager = new WindowShareManager(this);
 		WaylandCraftCommand.register();
 	}
 	
@@ -153,6 +158,11 @@ public class WaylandCraft implements ClientModInitializer {
 			WaylandCraftCommon.LOGGER.info("Server started on " + waylandSocket);
 		}
 		bridge.update();
+		
+		// 更新窗口共享（捕获+发送图像）
+		if(windowShareManager != null) {
+			windowShareManager.update();
+		}
 	}
 	
 	public void renderWorld(LevelRenderContext ctx) {

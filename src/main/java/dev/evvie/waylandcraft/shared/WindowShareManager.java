@@ -161,11 +161,12 @@ public class WindowShareManager {
 			return;
 		}
 		
-		// 捕获窗口图像
-		byte[] imageData = ImageCapture.captureFramebuffer(
-			0, 0,
-			toplevel.geometry.width(),
-			toplevel.geometry.height(),
+		// 捕获窗口图像 - 从窗口的framebuffer读取
+		if(toplevel.framebuffer == null) {
+			return;
+		}
+		byte[] imageData = ImageCapture.captureFromFramebuffer(
+			toplevel.framebuffer,
 			captureConfig.scale,
 			captureConfig.quality
 		);
@@ -180,10 +181,12 @@ public class WindowShareManager {
 			return;
 		}
 		
-		// 发送图像数据到服务器
+		// 发送图像数据到服务器（使用缩放后的尺寸）
+		int scaledW = (int)(toplevel.geometry.width() * captureConfig.scale);
+		int scaledH = (int)(toplevel.geometry.height() * captureConfig.scale);
 		SharedWindowImagePayload imagePayload = new SharedWindowImagePayload(
 			state.windowHandle, 0, 0, 0,
-			toplevel.geometry.width(), toplevel.geometry.height(),
+			scaledW, scaledH,
 			processedData
 		);
 		ClientPlayNetworking.send(imagePayload);

@@ -2,16 +2,19 @@ package dev.evvie.waylandcraft.network;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import dev.evvie.waylandcraft.WaylandCraftCommon;
+import dev.evvie.waylandcraft.shared.PermissionManager;
 import dev.evvie.waylandcraft.shared.SharedWindowEntry;
 import dev.evvie.waylandcraft.shared.SharedWindowManager;
 import dev.evvie.waylandcraft.shared.WindowPermission;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
@@ -110,6 +113,95 @@ public class SharedWindowServerHandler {
 		
 		// 广播状态更新给所有订阅者
 		broadcastWindowState(entry, payload);
+	}
+	
+	/**
+	 * 处理客户端权限管理命令
+	 */
+	public static void handlePermissionCommand(PermissionCommandPayload payload, ServerPlayer player) {
+		PermissionManager pm = WaylandCraftCommon.instance.permissionManager;
+		byte action = payload.action();
+		
+		switch (action) {
+			case PermissionCommandPayload.ACTION_SET_DEFAULT -> {
+				WindowPermission perm = WindowPermission.values()[payload.permissionLevel()];
+				pm.setDefaultPermission(perm);
+				sendPermResponse(player, "Default permission set to " + perm.name());
+			}
+			case PermissionCommandPayload.ACTION_ALLOW -> {
+				String targetName = payload.targetName();
+				WindowPermission perm = WindowPermission.values()[payload.permissionLevel()];
+				ServerPlayer target = WaylandCraftCommon.instance.server.getPlayerList().getPlayerByName(targetName);
+				if (target != null) {
+					pm.addToWhitelist(target.getUUID(), perm);
+					sendPermResponse(player, "Added " + targetName + " to whitelist with " + perm.name());
+				} else {
+					sendPermResponse(player, "Player not found: " + targetName);
+				}
+			}
+			case PermissionCommandPayload.ACTION_DENY -> {
+				String targetName = payload.targetName();
+				ServerPlayer target = WaylandCraftCommon.instance.server.getPlayerList().getPlayerByName(targetName);
+				if (target != null) {
+					pm.addToBlacklist(target.getUUID());
+					sendPermResponse(player, "Added " + targetName + " to blacklist");
+				} else {
+					sendPermResponse(player, "Player not found: " + targetName);
+				}
+			}
+			case PermissionCommandPayload.ACTION_REMOVE -> {
+				String targetName = payload.targetName();
+				ServerPlayer target = WaylandCraftCommon.instance.server.getPlayerList().getPlayerByName(targetName);
+				if (target != null) {
+					pm.removeFromWhitelist(target.getUUID());
+					pm.removeFromBlacklist(target.getUUID());
+					sendPermResponse(player, "Removed " + targetName + " from whitelist and blacklist");
+				} else {
+					sendPermResponse(player, "Player not found: " + targetName);
+				}
+			}
+			case PermissionCommandPayload.ACTION_LIST -> {
+				StringBuilder sb = new StringBuilder();
+				sb.append("=== Permissions ===\n");
+				sb.append("Default: ").append(pm.getDefaultPermission().name()).append("\n");
+				
+				Map<UUID, WindowPermission> whitelist = pm.getWhitelist();
+				if (!whitelist.isEmpty()) {
+					sb.append("Whitelist:\n");
+					for (Map.Entry<UUID, WindowPermission> entry : whitelist.entrySet()) {
+						String name = resolveName(player, entry.getKey());
+						sb.append("  ").append(name).append(": ").append(entry.getValue().name()).append("\n");
+					}
+				}
+				
+				var blacklist = pm.getBlacklist();
+				if (!blacklist.isEmpty()) {
+					sb.append("Blacklist:\n");
+					for (UUID uuid : blacklist) {
+						sb.append("  ").append(resolveName(player, uuid)).append("\n");
+					}
+				}
+				
+				if (whitelist.isEmpty() && blacklist.isEmpty()) {
+					sb.append("No player-specific permissions.");
+				}
+				
+				// 分行发送
+				for (String line : sb.toString().split("\\n")) {
+					player.sendSystemMessage(Component.literal(line));
+				}
+			}
+			default -> sendPermResponse(player, "Unknown action: " + action);
+		}
+	}
+	
+	private static void sendPermResponse(ServerPlayer player, String message) {
+		player.sendSystemMessage(Component.literal("[WLC] " + message));
+	}
+	
+	private static String resolveName(ServerPlayer player, UUID uuid) {
+		ServerPlayer p = WaylandCraftCommon.instance.server.getPlayerList().getPlayer(uuid);
+		return p != null ? p.getName().getString() : uuid.toString().substring(0, 8);
 	}
 	
 	/**

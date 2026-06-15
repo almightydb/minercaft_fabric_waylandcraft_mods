@@ -306,6 +306,13 @@ public class WindowFramebuffer {
 		return target != null;
 	}
 	
+	/**
+	 * 获取底层RenderTarget，用于图像捕获时绑定FBO
+	 */
+	public com.mojang.blaze3d.pipeline.RenderTarget getRenderTarget() {
+		return target;
+	}
+	
 	private static class FramebufferTexture extends AbstractTexture {
 		
 		public FramebufferTexture(GpuTextureView textureView) {

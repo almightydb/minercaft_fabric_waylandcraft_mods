@@ -14,6 +14,7 @@ import dev.evvie.waylandcraft.render.SharedWindowDisplay;
 import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import dev.evvie.waylandcraft.shared.WindowPermission;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import dev.evvie.waylandcraft.network.PermissionResponsePayload;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -56,6 +57,16 @@ public class SharedWindowClientHandler {
 		ClientPlayNetworking.registerGlobalReceiver(SharedWindowPermissionPayload.TYPE, (payload, ctx) -> {
 			ctx.client().execute(() -> {
 				handlePermissionUpdate(payload);
+			});
+		});
+		
+		// 处理权限命令响应
+		ClientPlayNetworking.registerGlobalReceiver(PermissionResponsePayload.TYPE, (payload, ctx) -> {
+			ctx.client().execute(() -> {
+				var mc = net.minecraft.client.Minecraft.getInstance();
+				if (mc.player != null) {
+					mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal(payload.message()));
+				}
 			});
 		});
 		

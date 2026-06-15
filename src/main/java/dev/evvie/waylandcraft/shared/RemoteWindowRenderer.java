@@ -1,7 +1,11 @@
 package dev.evvie.waylandcraft.shared;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import javax.imageio.ImageIO;
 
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -44,30 +48,41 @@ public class RemoteWindowRenderer {
 	 * 更新远程窗口纹理
 	 */
 	public void updateTexture(long windowHandle, int x, int y, int width, int height, byte[] jpegData) {
+		// 解码JPEG获取实际尺寸
+		NativeImage image;
+		try {
+			image = decodeImageData(jpegData, width, height);
+		} catch(Exception e) {
+			LOGGER.error("Failed to decode image for window 0x{}", Long.toHexString(windowHandle), e);
+			return;
+		}
+		if(image == null) return;
+		
+		int actualWidth = image.getWidth();
+		int actualHeight = image.getHeight();
+		
 		TextureEntry entry = textureCache.get(windowHandle);
 		
-		if(entry == null || entry.width != width || entry.height != height) {
-			// 创建新纹理
+		// 尺寸变化或首次创建时重建纹理
+		if(entry == null || entry.width != actualWidth || entry.height != actualHeight) {
 			destroyTexture(windowHandle);
-			entry = createTexture(windowHandle, width, height);
-			if(entry == null) return;
+			entry = createTexture(windowHandle, actualWidth, actualHeight);
+			if(entry == null) {
+				image.close();
+				return;
+			}
 		}
 		
-		// 解码数据并更新纹理
+		// 更新纹理
 		try {
-			NativeImage image = decodeImageData(jpegData, width, height);
-			if(image != null) {
-				// 用新图像数据替换DynamicTexture的NativeImage
-				entry.texture.close();
-				DynamicTexture newTexture = new DynamicTexture(() -> "remote_window_" + Long.toHexString(windowHandle), image);
-				entry.texture = newTexture;
-				
-				// 重新注册到TextureManager
-				TextureManager textureManager = Minecraft.getInstance().getTextureManager();
-				textureManager.register(entry.location, newTexture);
-				
-				entry.lastUpdate = System.currentTimeMillis();
-			}
+			entry.texture.close();
+			DynamicTexture newTexture = new DynamicTexture(() -> "remote_window_" + Long.toHexString(windowHandle), image);
+			entry.texture = newTexture;
+			
+			TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+			textureManager.register(entry.location, newTexture);
+			
+			entry.lastUpdate = System.currentTimeMillis();
 		} catch(Exception e) {
 			LOGGER.error("Failed to update texture for window 0x{}", Long.toHexString(windowHandle), e);
 		}
@@ -131,31 +146,46 @@ public class RemoteWindowRenderer {
 	}
 	
 	/**
-	 * 解码图像数据并填充到NativeImage
+	 * 获取纹理尺寸
+	 */
+	public int[] getTextureDimensions(long windowHandle) {
+		TextureEntry entry = textureCache.get(windowHandle);
+		if(entry == null) return null;
+		return new int[]{entry.width, entry.height};
+	}
+	
+	/**
+	 * 解码JPEG图像数据为NativeImage
 	 */
 	@Nullable
 	private NativeImage decodeImageData(byte[] data, int width, int height) {
 		try {
-			NativeImage image = new NativeImage(width, height, false);
+			// 用ImageIO解码JPEG数据
+			BufferedImage bufferedImage = ImageIO.read(new ByteArrayInputStream(data));
+			if(bufferedImage == null) {
+				LOGGER.warn("ImageIO.read returned null (invalid JPEG data, {} bytes)", data.length);
+				return null;
+			}
 			
-			// 填充像素数据
-			for(int y = 0; y < height; y++) {
-				for(int x = 0; x < width; x++) {
-					int index = (y * width + x) * 3; // RGB格式
-					if(index + 2 < data.length) {
-						int r = data[index] & 0xFF;
-						int g = data[index + 1] & 0xFF;
-						int b = data[index + 2] & 0xFF;
-						int a = 255;
-						// ABGR格式: Alpha in highest byte, then B, G, R
-						image.setPixelABGR(x, y, (a << 24) | (b << 16) | (g << 8) | r);
-					}
+			int w = bufferedImage.getWidth();
+			int h = bufferedImage.getHeight();
+			NativeImage image = new NativeImage(w, h, false);
+			
+			for(int y = 0; y < h; y++) {
+				for(int x = 0; x < w; x++) {
+					int argb = bufferedImage.getRGB(x, y);
+					int a = (argb >> 24) & 0xFF;
+					int r = (argb >> 16) & 0xFF;
+					int g = (argb >> 8) & 0xFF;
+					int b = argb & 0xFF;
+					// NativeImage uses ABGR format
+					image.setPixelABGR(x, y, (a << 24) | (b << 16) | (g << 8) | r);
 				}
 			}
 			
 			return image;
 		} catch(Exception e) {
-			LOGGER.error("Failed to decode image data", e);
+			LOGGER.error("Failed to decode JPEG image data ({} bytes)", data.length, e);
 			return null;
 		}
 	}
