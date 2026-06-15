@@ -38,6 +38,7 @@ import dev.evvie.waylandcraft.render.SharedWindowDisplay;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettings;
 import dev.evvie.waylandcraft.settings.WaylandCraftSettingsManager;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
+import dev.evvie.waylandcraft.command.WaylandCraftCommand;
 import dev.evvie.waylandcraft.utils.CursorShape;
 import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import net.fabricmc.api.ClientModInitializer;
@@ -136,6 +137,7 @@ public class WaylandCraft implements ClientModInitializer {
 		WindowItemModel.register();
 		hudRenderer.register();
 		SharedWindowClientHandler.register();
+		WaylandCraftCommand.register();
 	}
 	
 	/* Update bridge and clients. May be called at any state of the game, even outside of a level
