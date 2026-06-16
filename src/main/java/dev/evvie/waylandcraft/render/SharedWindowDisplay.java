@@ -211,7 +211,8 @@ public class SharedWindowDisplay {
 	}
 	
 	/**
-	 * 渲染共享窗口 — 始终面向相机，使用REMOTE_TEXTURE管线
+	 * 渲染共享窗口 — 与WindowDisplay.render()完全相同的渲染逻辑
+	 * 使用renderFramebufferTexture（同一套WINDOW_CUTOUT/WINDOW_TRANSLUCENT管线）
 	 */
 	public void render(LevelRenderContext ctx) {
 		if(!visible) return;
@@ -220,7 +221,7 @@ public class SharedWindowDisplay {
 		Identifier textureLocation = renderer.getTextureLocation_obj(windowHandle);
 		if(textureLocation == null) return;
 		
-		// 从renderer获取实际纹理尺寸
+		// 从renderer获取实际纹理尺寸（对应WindowDisplay的updateGeometry）
 		int renderWidth = this.width;
 		int renderHeight = this.height;
 		if(renderWidth <= 0 || renderHeight <= 0) {
@@ -233,26 +234,14 @@ public class SharedWindowDisplay {
 			}
 		}
 		
-		// 获取渲染所需的各种向量
+		// 与WindowDisplay.render()完全一致的向量计算
 		Vec3 localX = localX();
 		Vec3 localY = localY();
-		
+
 		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
 		Vec3 originRel = origin().subtract(cameraPos);
-		
-		// 检查相机是否在窗口背面 — 如果是，翻转normal/down让窗口面向相机
-		Vec3 cameraDir = cameraPos.subtract(pivot).normalize();
-		boolean flipped = cameraDir.dot(normal) > 0;
-		
-		if(flipped) {
-			// 翻转法线和向下向量
-			// right = normal×down → (-normal)×(-down) = normal×down，不变
-			// 但localY方向反转，需要交换tl↔tr来纠正UV镜像
-			localX = normal.reverse().cross(down.reverse()).scale(pixelScale());
-			localY = down.reverse().scale(pixelScale());
-		}
-		
-		// 计算四个角的位置
+
+		// 远程纹理没有xoff/yoff（不需要bufOffset）
 		Vec3 tl = new Vec3(0, 0, 0);
 		Vec3 bl = localY.scale(renderHeight);
 		Vec3 br = bl.add(localX.scale(renderWidth));
@@ -261,15 +250,8 @@ public class SharedWindowDisplay {
 		PoseStack poseStack = ctx.poseStack();
 		poseStack.pushPose();
 		poseStack.translate(originRel.x, originRel.y, originRel.z);
-		
-		if(!flipped) {
-			// 正常朝向：标准渲染
-			RenderUtils.renderRemoteTexture(textureLocation, poseStack, ctx.submitNodeCollector(), tl, bl, br, tr);
-		} else {
-			// 翻转朝向：交换左右顶点纠正水平镜像
-			RenderUtils.renderRemoteTexture(textureLocation, poseStack, ctx.submitNodeCollector(), tr, br, bl, tl);
-		}
-		
+		// 使用与WindowDisplay完全相同的渲染管线（cutout=true，和原始一致）
+		RenderUtils.renderFramebufferTexture(textureLocation, poseStack, ctx.submitNodeCollector(), true, tl, bl, br, tr);
 		poseStack.popPose();
 	}
 	

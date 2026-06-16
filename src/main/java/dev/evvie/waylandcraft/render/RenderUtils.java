@@ -160,17 +160,27 @@ public class RenderUtils {
 	
 	public static void renderFramebuffer(WindowFramebuffer framebuffer, PoseStack poseStack, SubmitNodeCollector collector, boolean cutout, Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) {
 		if(!framebuffer.isValid()) return;
+		renderFramebufferTexture(framebuffer.getTextureLocation(), poseStack, collector, cutout, tl, bl, br, tr);
+	}
+	
+	/**
+	 * 渲染远程纹理 — 使用与WindowFramebuffer完全相同的渲染管线
+	 * cutout=true: WINDOW_CUTOUT管线（不透明内容）
+	 * cutout=false: WINDOW_TRANSLUCENT管线（半透明内容）
+	 */
+	public static void renderFramebufferTexture(Identifier textureLocation, PoseStack poseStack, SubmitNodeCollector collector, boolean cutout, Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) {
+		if(textureLocation == null) return;
 		
 		Function<Identifier, RenderType> renderType;
 		
 		// Front quad
 		if(WaylandCraft.instance.settings.getAntialiasing()) renderType = cutout ? WINDOW_CUTOUT_ANTIALIAS : WINDOW_TRANSLUCENT_ANTIALIAS;
 		else renderType = cutout ? WINDOW_CUTOUT : WINDOW_TRANSLUCENT;
-		collector.submitCustomGeometry(poseStack, renderType.apply(framebuffer.getTextureLocation()), new FramebufferRenderInstance(tl, bl, br, tr, false));
+		collector.submitCustomGeometry(poseStack, renderType.apply(textureLocation), new FramebufferRenderInstance(tl, bl, br, tr, false));
 		
 		// Back quad
 		renderType = cutout ? WINDOW_BACKGROUND_CUTOUT : WINDOW_BACKGROUND_TRANSLUCENT;
-		collector.submitCustomGeometry(poseStack, renderType.apply(framebuffer.getTextureLocation()), new FramebufferRenderInstance(tl, bl, br, tr, true));
+		collector.submitCustomGeometry(poseStack, renderType.apply(textureLocation), new FramebufferRenderInstance(tl, bl, br, tr, true));
 	}
 	
 	public static final record FramebufferRenderInstance(Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr, boolean reverse) implements CustomGeometryRenderer {
