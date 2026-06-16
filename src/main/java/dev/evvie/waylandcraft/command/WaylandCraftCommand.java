@@ -1,9 +1,11 @@
 package dev.evvie.waylandcraft.command;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 
@@ -56,6 +58,15 @@ public class WaylandCraftCommand {
 						.executes(WaylandCraftCommand::closeWindow)
 					)
 				)
+				.then(ClientCommands.literal("resize")
+					.then(ClientCommands.argument("handle", StringArgumentType.word())
+						.then(ClientCommands.argument("width", IntegerArgumentType.integer(1, 10000))
+							.then(ClientCommands.argument("height", IntegerArgumentType.integer(1, 10000))
+								.executes(WaylandCraftCommand::resizeWindow)
+							)
+						)
+					)
+				)
 				.then(ClientCommands.literal("share")
 					.then(ClientCommands.argument("handle", StringArgumentType.word())
 						.executes(WaylandCraftCommand::shareWindow)
@@ -105,10 +116,23 @@ public class WaylandCraftCommand {
 		);
 	}
 
-	// ===== Handle 缩短显示 =====
+	// ===== Handle & Alias =====
 
 	private static String shortHex(long handle) {
 		return SHORT_PREFIX + Long.toHexString(handle & 0xFFFF);
+	}
+
+	/**
+	 * 生成窗口别名：小写+下划线，去除空格和特殊字符
+	 * "Firefox ESR" → "firefox_esr"
+	 * "Google Chrome" → "google_chrome"
+	 */
+	private static String getWindowAlias(WLCToplevel toplevel) {
+		String name = getWindowDisplayName(toplevel);
+		return name.toLowerCase()
+			.replaceAll("[^a-z0-9\\s]", "") // 移除特殊字符
+			.trim()
+			.replaceAll("\\s+", "_"); // 空格→下划线
 	}
 
 	private static long parseWindowHandle(String handleStr) {
@@ -124,7 +148,7 @@ public class WaylandCraftCommand {
 	}
 
 	/**
-	 * 按短handle查找窗口 - 先精确匹配，再后缀匹配
+	 * 查找窗口 - 支持 hex handle、别名、后缀匹配
 	 */
 	private static WLCToplevel findToplevelByHandle(FabricClientCommandSource source, String handleStr) {
 		WaylandCraft wlc = WaylandCraft.instance;
@@ -133,20 +157,37 @@ public class WaylandCraftCommand {
 			return null;
 		}
 
-		long handle = parseWindowHandle(handleStr);
+		WLCToplevel[] toplevels = wlc.bridge.getToplevels();
 
-		// 先精确匹配
+		// 1. 尝试 hex handle 解析
+		long handle = parseWindowHandle(handleStr);
 		if(handle >= 0) {
 			WLCToplevel t = wlc.bridge.getToplevel(handle);
 			if(t != null) return t;
 		}
 
-		// 后缀匹配（支持短handle如 0xABCD）
-		WLCToplevel[] toplevels = wlc.bridge.getToplevels();
+		// 2. 后缀匹配（支持短handle如 0xABCD）
 		String hex = handleStr.toLowerCase().replace("0x", "");
 		for(WLCToplevel t : toplevels) {
 			String fullHex = Long.toHexString(t.getHandle());
 			if(fullHex.endsWith(hex)) {
+				return t;
+			}
+		}
+
+		// 3. 别名匹配（精确）
+		String aliasInput = handleStr.toLowerCase().replaceAll("[^a-z0-9_]", "");
+		for(WLCToplevel t : toplevels) {
+			String alias = getWindowAlias(t);
+			if(alias.equals(aliasInput)) {
+				return t;
+			}
+		}
+
+		// 4. 别名模糊匹配（包含）
+		for(WLCToplevel t : toplevels) {
+			String alias = getWindowAlias(t);
+			if(alias.contains(aliasInput) || aliasInput.contains(alias)) {
 				return t;
 			}
 		}
@@ -194,20 +235,22 @@ public class WaylandCraftCommand {
 		} else {
 			for(WLCToplevel toplevel : toplevels) {
 				String hex = shortHex(toplevel.getHandle());
+				String alias = getWindowAlias(toplevel);
 				String displayName = getWindowDisplayName(toplevel);
+				int w = toplevel.geometry.width();
+				int h = toplevel.geometry.height();
 				boolean shared = isWindowShared(toplevel.getHandle());
 
-				String line = " §e" + hex + "§r §f" + displayName + "§r";
-				if(toplevel.appID != null && !toplevel.appID.isEmpty()) {
-					line += " §7- §8" + toplevel.appID + "§r";
-				}
-				if(shared) line += " §a✔ shared§r";
+				String line = " §e" + hex + "§r §a" + alias + "§r §f" + displayName + "§r §7" + w + "x" + h + "§r";
+				if(shared) line += " §a✔§r";
 
 				source.sendFeedback(Component.literal(line));
 			}
 		}
 
 		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal(" §7Use §e/wl resize <alias> <w> <h>§7 to resize§r"));
+		source.sendFeedback(Component.literal(" §7Use §e/wl share <alias>§7 to share§r"));
 		return toplevels.length;
 	}
 
@@ -317,35 +360,53 @@ public class WaylandCraftCommand {
 
 	/**
 	 * 通过ProcessBuilder启动应用，设置Wayland环境变量
-	 * 比原生execApp更可靠，支持GTK/Qt/Firefox等需要特定环境变量的应用
 	 */
 	private static boolean launchApp(WaylandCraft wlc, DesktopEntry entry) {
 		if(entry.exec == null || entry.exec.isEmpty()) {
 			return wlc.bridge.execApp(entry.appId);
 		}
 		try {
-			// 清理exec命令 - 移除 .desktop 字段代码 (%f %F %u %U 等)
 			String exec = entry.exec.replaceAll("%[fFuUdDnNickvm]", "").trim();
 			String[] parts = exec.split("\\s+");
 
-			String socketPath = wlc.bridge.getSocket();
-			if(socketPath == null || socketPath.isEmpty()) {
+			String socketName = wlc.bridge.getSocket();
+			if(socketName == null || socketName.isEmpty()) {
 				return wlc.bridge.execApp(entry.appId);
 			}
 
+			String runtimeDir = findRuntimeDir(socketName);
+
 			ProcessBuilder pb = new ProcessBuilder(parts);
-			pb.environment().put("WAYLAND_DISPLAY", socketPath);
+			pb.environment().put("WAYLAND_DISPLAY", socketName);
+			if(runtimeDir != null) {
+				pb.environment().put("XDG_RUNTIME_DIR", runtimeDir);
+			}
 			pb.environment().put("GDK_BACKEND", "wayland");
 			pb.environment().put("QT_QPA_PLATFORM", "wayland");
 			pb.environment().put("MOZ_ENABLE_WAYLAND", "1");
-			pb.environment().put("DISPLAY", ""); // 禁止X11回退
+			pb.environment().put("DISPLAY", "");
 			pb.redirectErrorStream(true);
 			pb.start();
 			return true;
 		} catch(Exception e) {
-			// 回退到原生exec
 			return wlc.bridge.execApp(entry.appId);
 		}
+	}
+
+	private static String findRuntimeDir(String socketName) {
+		String envDir = System.getenv("XDG_RUNTIME_DIR");
+		if(envDir != null && new File(envDir, socketName).exists()) {
+			return envDir;
+		}
+		File runUser = new File("/run/user");
+		if(runUser.isDirectory()) {
+			for(File uidDir : runUser.listFiles()) {
+				if(uidDir.isDirectory() && new File(uidDir, socketName).exists()) {
+					return uidDir.getAbsolutePath();
+				}
+			}
+		}
+		return null;
 	}
 
 	private static int removeWindowItem(CommandContext<FabricClientCommandSource> context) {
@@ -409,6 +470,27 @@ public class WaylandCraftCommand {
 		}
 		source.sendError(Component.literal("§c✘ No app ID available§r"));
 		return 0;
+	}
+
+	private static int resizeWindow(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		String handleStr = StringArgumentType.getString(context, "handle");
+		int width = IntegerArgumentType.getInteger(context, "width");
+		int height = IntegerArgumentType.getInteger(context, "height");
+
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.bridge == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		wlc.bridge.resizeToplevelInteractive(toplevel, width, height);
+		String alias = getWindowAlias(toplevel);
+		source.sendFeedback(Component.literal("§a✔ Resized §f" + alias + "§r → §e" + width + "x" + height + "§r"));
+		return 1;
 	}
 
 	private static int shareWindow(CommandContext<FabricClientCommandSource> context) {
