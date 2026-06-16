@@ -19,6 +19,14 @@ pub fn spawn(
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("LD_LIBRARY_PATH");
 
+    // Set XDG_RUNTIME_DIR if not already set (needed for Wayland socket discovery)
+    if std::env::var("XDG_RUNTIME_DIR").is_err() {
+        if let Some(uid) = get_uid() {
+            let runtime_dir = format!("/run/user/{}", uid);
+            command.env("XDG_RUNTIME_DIR", &runtime_dir);
+        }
+    }
+
     command.envs(env);
 
     // Double-fork to run the executable.
@@ -47,4 +55,8 @@ pub fn spawn(
     }
 
     Ok(())
+}
+
+fn get_uid() -> Option<u32> {
+    unsafe { Some(libc::getuid()) }
 }
