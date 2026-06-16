@@ -139,10 +139,10 @@ public class SharedWindowDisplay {
 	}
 	
 	/**
-	 * 获取像素缩放比例
+	 * 获取像素缩放比例 — 与WindowDisplay一致，读取用户设置
 	 */
 	public float pixelScale() {
-		return 1.0f / 16.0f; // 默认16像素每方块
+		return 1.0f / WaylandCraft.instance.settings.getPixelsPerBlock();
 	}
 	
 	/**
@@ -212,6 +212,7 @@ public class SharedWindowDisplay {
 	
 	/**
 	 * 渲染共享窗口 — 使用与WindowDisplay.render相同的WINDOW_CUTOUT管线
+	 * 始终面向相机（翻转normal/down避免看到镜像背面）
 	 */
 	public void render(LevelRenderContext ctx) {
 		if(!visible) return;
@@ -240,7 +241,19 @@ public class SharedWindowDisplay {
 		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
 		Vec3 originRel = origin().subtract(cameraPos);
 		
-		// 计算四个角的位置（无xoff/yoff，因为远程纹理没有这个概念）
+		// 检查相机是否在窗口背面 — 如果是，翻转normal/down让窗口面向相机
+		Vec3 cameraDir = cameraPos.subtract(pivot).normalize();
+		boolean flipped = cameraDir.dot(normal) > 0;
+		
+		if(flipped) {
+			// 翻转法线和向下向量，让窗口面向相机
+			// right = normal×down → (-normal)×(-down) = normal×down，不变
+			// 但localX和localY方向反转，需要交换tl↔tr来纠正UV镜像
+			localX = normal.reverse().cross(down.reverse()).scale(pixelScale());
+			localY = down.reverse().scale(pixelScale());
+		}
+		
+		// 计算四个角的位置
 		Vec3 tl = new Vec3(0, 0, 0);
 		Vec3 bl = localY.scale(renderHeight);
 		Vec3 br = bl.add(localX.scale(renderWidth));
@@ -254,8 +267,16 @@ public class SharedWindowDisplay {
 		
 		// 前面 — 使用WINDOW_CUTOUT渲染类型（双面渲染，与renderFramebuffer一致）
 		RenderType cutoutType = RenderUtils.WINDOW_CUTOUT.apply(textureLocation);
-		collector.submitCustomGeometry(poseStack, cutoutType,
-			new RenderUtils.FramebufferRenderInstance(tl, bl, br, tr, false));
+		
+		if(!flipped) {
+			// 正常朝向：标准UV映射
+			collector.submitCustomGeometry(poseStack, cutoutType,
+				new RenderUtils.FramebufferRenderInstance(tl, bl, br, tr, false));
+		} else {
+			// 翻转朝向：交换左右顶点纠正水平镜像
+			collector.submitCustomGeometry(poseStack, cutoutType,
+				new RenderUtils.FramebufferRenderInstance(tr, br, bl, tl, false));
+		}
 		
 		// 背面 — 使用WINDOW_BACKGROUND_CUTOUT渲染类型
 		RenderType bgType = RenderUtils.WINDOW_BACKGROUND_CUTOUT.apply(textureLocation);
