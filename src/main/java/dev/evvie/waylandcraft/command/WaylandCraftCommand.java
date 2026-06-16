@@ -1,6 +1,5 @@
 package dev.evvie.waylandcraft.command;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,6 +34,12 @@ public class WaylandCraftCommand {
 			ClientCommands.literal("wl")
 				.then(ClientCommands.literal("list")
 					.executes(WaylandCraftCommand::listWindows)
+					.then(ClientCommands.literal("windows")
+						.executes(WaylandCraftCommand::listWindows)
+					)
+					.then(ClientCommands.literal("apps")
+						.executes(WaylandCraftCommand::listApps)
+					)
 				)
 				.then(ClientCommands.literal("give")
 					.then(ClientCommands.argument("app_name", StringArgumentType.greedyString())
@@ -60,9 +65,6 @@ public class WaylandCraftCommand {
 					.then(ClientCommands.argument("handle", StringArgumentType.word())
 						.executes(WaylandCraftCommand::unshareWindow)
 					)
-				)
-				.then(ClientCommands.literal("test")
-					.executes(WaylandCraftCommand::runTest)
 				)
 				// 权限管理 - 任意玩家可用
 				.then(ClientCommands.literal("perm")
@@ -127,7 +129,7 @@ public class WaylandCraftCommand {
 	private static WLCToplevel findToplevelByHandle(FabricClientCommandSource source, String handleStr) {
 		WaylandCraft wlc = WaylandCraft.instance;
 		if(wlc == null || wlc.bridge == null) {
-			source.sendError(Component.literal("WaylandCraft not initialized"));
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
 			return null;
 		}
 
@@ -149,7 +151,7 @@ public class WaylandCraftCommand {
 			}
 		}
 
-		source.sendError(Component.literal("Window not found: " + handleStr));
+		source.sendError(Component.literal("§c✘ Window not found: " + handleStr + "§r"));
 		return null;
 	}
 
@@ -178,30 +180,67 @@ public class WaylandCraftCommand {
 		WaylandCraft wlc = WaylandCraft.instance;
 
 		if(wlc == null || wlc.bridge == null) {
-			source.sendError(Component.literal("WaylandCraft not initialized"));
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
 			return 0;
 		}
 
 		WLCToplevel[] toplevels = wlc.bridge.getToplevels();
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal("§6 §lWaylandCraft §r§7 Windows §7(" + toplevels.length + " total)§r"));
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+
 		if(toplevels.length == 0) {
-			source.sendFeedback(Component.literal("No windows detected"));
-			return 1;
+			source.sendFeedback(Component.literal(" §7No windows detected§r"));
+		} else {
+			for(WLCToplevel toplevel : toplevels) {
+				String hex = shortHex(toplevel.getHandle());
+				String displayName = getWindowDisplayName(toplevel);
+				boolean shared = isWindowShared(toplevel.getHandle());
+
+				String line = " §e" + hex + "§r §f" + displayName + "§r";
+				if(toplevel.appID != null && !toplevel.appID.isEmpty()) {
+					line += " §7- §8" + toplevel.appID + "§r";
+				}
+				if(shared) line += " §a✔ shared§r";
+
+				source.sendFeedback(Component.literal(line));
+			}
 		}
 
-		source.sendFeedback(Component.literal("=== Windows (" + toplevels.length + ") ==="));
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		return toplevels.length;
+	}
 
-		for(WLCToplevel toplevel : toplevels) {
-			String hex = shortHex(toplevel.getHandle());
-			String displayName = getWindowDisplayName(toplevel);
-			boolean shared = isWindowShared(toplevel.getHandle());
+	private static int listApps(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
 
-			String line = "[" + hex + "] " + displayName;
-			if(shared) line += " (shared)";
+		if(wlc == null || wlc.xdgManager == null) {
+			source.sendError(Component.literal("§c✘ Desktop entries not loaded§r"));
+			return 0;
+		}
 
+		List<DesktopEntry> entries = wlc.xdgManager.entries();
+		List<DesktopEntry> visible = new ArrayList<>();
+		for(DesktopEntry e : entries) {
+			if(e.visible && e.name != null) visible.add(e);
+		}
+
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal("§6 §lWaylandCraft §r§7 Apps §7(" + visible.size() + " total)§r"));
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+
+		for(DesktopEntry entry : visible) {
+			String name = entry.name;
+			String desc = entry.genericName != null ? entry.genericName : "";
+			String line = " §b" + name + "§r";
+			if(!desc.isEmpty()) line += " §7- §8" + desc + "§r";
 			source.sendFeedback(Component.literal(line));
 		}
 
-		return toplevels.length;
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal(" §7Use §e/wl give <name>§7 to launch§r"));
+		return 1;
 	}
 
 	private static int giveWindowItem(CommandContext<FabricClientCommandSource> context) {
@@ -210,7 +249,7 @@ public class WaylandCraftCommand {
 		WaylandCraft wlc = WaylandCraft.instance;
 
 		if(wlc == null || wlc.bridge == null) {
-			source.sendError(Component.literal("WaylandCraft not initialized"));
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
 			return 0;
 		}
 
@@ -231,12 +270,12 @@ public class WaylandCraftCommand {
 
 		if(matchedToplevel != null) {
 			wlc.itemManager.giveItem(matchedToplevel);
-			source.sendFeedback(Component.literal("Given window item for: " + getWindowDisplayName(matchedToplevel)));
+			source.sendFeedback(Component.literal("§a✔ Given window: §f" + getWindowDisplayName(matchedToplevel) + "§r"));
 			return 1;
 		}
 
 		if(wlc.xdgManager == null) {
-			source.sendError(Component.literal("Desktop entries not loaded yet"));
+			source.sendError(Component.literal("§c✘ Desktop entries not loaded§r"));
 			return 0;
 		}
 
@@ -254,47 +293,76 @@ public class WaylandCraftCommand {
 		}
 
 		if(matches.isEmpty()) {
-			source.sendError(Component.literal("No application found matching: " + appName));
+			source.sendError(Component.literal("§c✘ No application found: " + appName + "§r"));
 			return 0;
 		}
 
 		if(matches.size() > 1) {
-			source.sendFeedback(Component.literal("Multiple matches found:"));
+			source.sendFeedback(Component.literal("§eMultiple matches:§r"));
 			for(DesktopEntry entry : matches) {
-				source.sendFeedback(Component.literal("  - " + (entry.name != null ? entry.name : entry.appId)));
+				source.sendFeedback(Component.literal("  §b- " + (entry.name != null ? entry.name : entry.appId) + "§r"));
 			}
 			return 0;
 		}
 
 		DesktopEntry entry = matches.get(0);
-		boolean launched = wlc.bridge.execApp(entry.appId);
+		boolean launched = launchApp(wlc, entry);
 		if(launched) {
-			source.sendFeedback(Component.literal("Launched: " + (entry.name != null ? entry.name : entry.appId)));
+			source.sendFeedback(Component.literal("§a✔ Launched: §f" + (entry.name != null ? entry.name : entry.appId) + "§r"));
 		} else {
-			source.sendError(Component.literal("Failed to launch: " + entry.appId));
+			source.sendError(Component.literal("§c✘ Failed to launch: " + entry.appId + "§r"));
 		}
 		return launched ? 1 : 0;
+	}
+
+	/**
+	 * 通过ProcessBuilder启动应用，设置Wayland环境变量
+	 * 比原生execApp更可靠，支持GTK/Qt/Firefox等需要特定环境变量的应用
+	 */
+	private static boolean launchApp(WaylandCraft wlc, DesktopEntry entry) {
+		if(entry.exec == null || entry.exec.isEmpty()) {
+			return wlc.bridge.execApp(entry.appId);
+		}
+		try {
+			// 清理exec命令 - 移除 .desktop 字段代码 (%f %F %u %U 等)
+			String exec = entry.exec.replaceAll("%[fFuUdDnNickvm]", "").trim();
+			String[] parts = exec.split("\\s+");
+
+			String socketPath = wlc.bridge.getSocket();
+			if(socketPath == null || socketPath.isEmpty()) {
+				return wlc.bridge.execApp(entry.appId);
+			}
+
+			ProcessBuilder pb = new ProcessBuilder(parts);
+			pb.environment().put("WAYLAND_DISPLAY", socketPath);
+			pb.environment().put("GDK_BACKEND", "wayland");
+			pb.environment().put("QT_QPA_PLATFORM", "wayland");
+			pb.environment().put("MOZ_ENABLE_WAYLAND", "1");
+			pb.environment().put("DISPLAY", ""); // 禁止X11回退
+			pb.redirectErrorStream(true);
+			pb.start();
+			return true;
+		} catch(Exception e) {
+			// 回退到原生exec
+			return wlc.bridge.execApp(entry.appId);
+		}
 	}
 
 	private static int removeWindowItem(CommandContext<FabricClientCommandSource> context) {
 		FabricClientCommandSource source = context.getSource();
 		String handleStr = StringArgumentType.getString(context, "handle");
 
-		// 匹配handle
 		WaylandCraft wlc = WaylandCraft.instance;
 		if(wlc == null || wlc.bridge == null) {
-			source.sendError(Component.literal("WaylandCraft not initialized"));
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
 			return 0;
 		}
 
-		long handle = -1;
-		// 先尝试精确解析
-		long parsed = parseWindowHandle(handleStr);
-		if(parsed >= 0) handle = parsed;
+		long handle = parseWindowHandle(handleStr);
 
 		Minecraft mc = Minecraft.getInstance();
 		if(mc.player == null) {
-			source.sendError(Component.literal("No player available"));
+			source.sendError(Component.literal("§c✘ No player available§r"));
 			return 0;
 		}
 
@@ -304,7 +372,6 @@ public class WaylandCraftCommand {
 			var stack = inventory.getItem(i);
 			Long itemHandle = stack.get(dev.evvie.waylandcraft.item.WindowItem.WINDOW_HANDLE);
 			if(itemHandle != null) {
-				// 精确匹配或后缀匹配
 				if(itemHandle == handle || Long.toHexString(itemHandle).endsWith(handleStr.toLowerCase().replace("0x", ""))) {
 					inventory.removeItem(i, 1);
 					found = true;
@@ -314,9 +381,9 @@ public class WaylandCraftCommand {
 		}
 
 		if(found) {
-			source.sendFeedback(Component.literal("Removed window item [" + handleStr + "]"));
+			source.sendFeedback(Component.literal("§a✔ Removed window §e" + handleStr + "§r"));
 		} else {
-			source.sendError(Component.literal("No window item matching " + handleStr));
+			source.sendError(Component.literal("§c✘ No window item: " + handleStr + "§r"));
 		}
 		return found ? 1 : 0;
 	}
@@ -333,14 +400,14 @@ public class WaylandCraftCommand {
 			try {
 				ProcessBuilder pb = new ProcessBuilder("pkill", "-f", toplevel.appID);
 				pb.start();
-				source.sendFeedback(Component.literal("Closed: " + displayName));
+				source.sendFeedback(Component.literal("§a✔ Closed: §f" + displayName + "§r"));
 				return 1;
 			} catch(Exception e) {
-				source.sendError(Component.literal("Failed: " + e.getMessage()));
+				source.sendError(Component.literal("§c✘ Failed: " + e.getMessage() + "§r"));
 				return 0;
 			}
 		}
-		source.sendError(Component.literal("No app ID available"));
+		source.sendError(Component.literal("§c✘ No app ID available§r"));
 		return 0;
 	}
 
@@ -358,7 +425,7 @@ public class WaylandCraftCommand {
 		} else {
 			SharedWindowClientHandler.requestWindowRegister(toplevel.getHandle(), displayName);
 		}
-		source.sendFeedback(Component.literal("Shared: " + displayName + " [" + shortHex(toplevel.getHandle()) + "]"));
+		source.sendFeedback(Component.literal("§a✔ Shared: §f" + displayName + "§r §e" + shortHex(toplevel.getHandle()) + "§r"));
 		return 1;
 	}
 
@@ -375,101 +442,12 @@ public class WaylandCraftCommand {
 		} else {
 			SharedWindowClientHandler.requestWindowUnregister(toplevel.getHandle());
 		}
-		source.sendFeedback(Component.literal("Unshared: " + getWindowDisplayName(toplevel)));
+		source.sendFeedback(Component.literal("§a✔ Unshared: §f" + getWindowDisplayName(toplevel) + "§r"));
 		return 1;
 	}
 
 	// ===== 权限命令 =====
 
-	// ===== 测试命令 =====
-	
-	private static int runTest(CommandContext<FabricClientCommandSource> context) {
-		FabricClientCommandSource source = context.getSource();
-		WaylandCraft wlc = WaylandCraft.instance;
-		
-		if(wlc == null || wlc.bridge == null) {
-			source.sendError(Component.literal("WaylandCraft not initialized"));
-			return 0;
-		}
-		
-		source.sendFeedback(Component.literal("[TEST] Starting test..."));
-		
-		// 1. 设置默认权限为VIEW（所有人可看）
-		ClientPlayNetworking.send(new PermissionCommandPayload(
-			PermissionCommandPayload.ACTION_SET_DEFAULT, "", (byte) WindowPermission.VIEW.ordinal()));
-		source.sendFeedback(Component.literal("[TEST] Default permission set to VIEW"));
-		
-		// 2. 在后台启动 firefox
-		new Thread(() -> {
-			try {
-				// 获取 wayland socket 路径
-				String socketPath = wlc.bridge.getSocket();
-				if(socketPath == null || socketPath.isEmpty()) {
-					sendChat(source, "[TEST] ERROR: No wayland socket");
-					return;
-				}
-				
-			sendChat(source, "[TEST] Launching firefox on " + socketPath + "...");
-			
-			// 使用 --no-remote + 临时profile强制新实例连到WaylandCraft socket
-			String tmpProfile = "/tmp/wlc-test-profile-" + System.currentTimeMillis();
-			new File(tmpProfile).mkdirs();
-			
-			ProcessBuilder pb = new ProcessBuilder(
-				"firefox", "--new-instance", "--no-remote",
-				"-profile", tmpProfile,
-				"--width", "800", "--height", "600",
-				"about:blank"
-			);
-			pb.environment().put("WAYLAND_DISPLAY", socketPath);
-			pb.environment().put("GDK_BACKEND", "wayland");
-			pb.environment().put("MOZ_ENABLE_WAYLAND", "1");
-			pb.environment().put("DISPLAY", ""); // 禁止X11回退
-			pb.redirectErrorStream(true);
-			Process proc = pb.start();
-				
-				sendChat(source, "[TEST] Firefox launched, waiting for window...");
-				
-				// 3. 等窗口出现（最多10秒）
-				for(int i = 0; i < 20; i++) {
-					Thread.sleep(500);
-					WLCToplevel[] toplevels = wlc.bridge.getToplevels();
-					for(WLCToplevel t : toplevels) {
-						if(t.appID != null && (t.appID.toLowerCase().contains("firefox")
-								|| t.title != null && t.title.toLowerCase().contains("firefox"))) {
-							// 找到了！分享它
-							String displayName = getWindowDisplayName(t);
-							long handle = t.getHandle();
-							
-							if(wlc.windowShareManager != null) {
-								wlc.windowShareManager.startSharing(handle, displayName);
-							} else {
-								SharedWindowClientHandler.requestWindowRegister(handle, displayName);
-							}
-							
-							sendChat(source, "[TEST] Shared: " + displayName + " [" + shortHex(handle) + "]");
-							sendChat(source, "[TEST] Test ready! Other players should see the window.");
-							return;
-						}
-					}
-				}
-				
-				sendChat(source, "[TEST] ERROR: Firefox window not found after 10s");
-			} catch(Exception e) {
-				sendChat(source, "[TEST] ERROR: " + e.getMessage());
-			}
-		}, "wl-test").start();
-		
-		return 1;
-	}
-	
-	private static void sendChat(FabricClientCommandSource source, String msg) {
-		var mc = net.minecraft.client.Minecraft.getInstance();
-		if(mc.player != null) {
-			mc.execute(() -> mc.player.sendSystemMessage(Component.literal(msg)));
-		}
-	}
-	
 	private static int permList(CommandContext<FabricClientCommandSource> context) {
 		ClientPlayNetworking.send(new PermissionCommandPayload(
 			PermissionCommandPayload.ACTION_LIST, "", (byte) 0));
@@ -513,7 +491,7 @@ public class WaylandCraftCommand {
 		try {
 			return WindowPermission.valueOf(permStr);
 		} catch(IllegalArgumentException e) {
-			source.sendError(Component.literal("Invalid permission: " + permStr + " (NONE/VIEW/INTERACT/CONTROL)"));
+			source.sendError(Component.literal("§c✘ Invalid permission: " + permStr + " (NONE/VIEW/INTERACT/CONTROL)§r"));
 			return null;
 		}
 	}
