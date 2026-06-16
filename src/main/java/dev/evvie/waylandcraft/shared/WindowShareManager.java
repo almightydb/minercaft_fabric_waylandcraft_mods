@@ -17,6 +17,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import dev.evvie.waylandcraft.render.SharedWindowDisplay;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * 窗口共享管理器
@@ -200,20 +201,31 @@ public class WindowShareManager {
 		int scaledW = (int)(toplevel.geometry.width() * captureConfig.scale);
 		int scaledH = (int)(toplevel.geometry.height() * captureConfig.scale);
 		
-		// 获取玩家世界坐标
-		double posX = 0, posY = 0, posZ = 0;
-		var player = Minecraft.getInstance().player;
-		if(player != null) {
-			posX = player.getX();
-			posY = player.getY();
-			posZ = player.getZ();
+		// 从本地WindowDisplay获取窗口变换（pivot/normal/down）
+		double pivotX = 0, pivotY = 0, pivotZ = 0;
+		double normalX = 0, normalY = 0, normalZ = 1;
+		double downX = 0, downY = -1, downZ = 0;
+		if(clientMod != null) {
+			for(var display : clientMod.displays) {
+				if(display.window.getHandle() == state.windowHandle) {
+					Vec3 pivot = display.pivot;
+					Vec3 normal = display.normal();
+					Vec3 d = display.down();
+					pivotX = pivot.x; pivotY = pivot.y; pivotZ = pivot.z;
+					normalX = normal.x; normalY = normal.y; normalZ = normal.z;
+					downX = d.x; downY = d.y; downZ = d.z;
+					break;
+				}
+			}
 		}
 		
 		SharedWindowImagePayload imagePayload = new SharedWindowImagePayload(
 			state.windowHandle, 0, 0, 0,
 			scaledW, scaledH,
 			processedData,
-			posX, posY, posZ
+			pivotX, pivotY, pivotZ,
+			normalX, normalY, normalZ,
+			downX, downY, downZ
 		);
 		ClientPlayNetworking.send(imagePayload);
 		

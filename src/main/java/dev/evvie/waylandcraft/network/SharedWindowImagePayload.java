@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
-public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x, int y, int width, int height, byte[] imageData, double posX, double posY, double posZ) implements CustomPacketPayload {
+public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x, int y, int width, int height, byte[] imageData, double pivotX, double pivotY, double pivotZ, double normalX, double normalY, double normalZ, double downX, double downY, double downZ) implements CustomPacketPayload {
 	
 	public static final Identifier ID = Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "shared_window_image");
 	
@@ -22,9 +22,15 @@ public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x
 			buf.writeVarInt(payload.height);
 			buf.writeVarInt(payload.imageData.length);
 			buf.writeBytes(payload.imageData);
-			buf.writeDouble(payload.posX);
-			buf.writeDouble(payload.posY);
-			buf.writeDouble(payload.posZ);
+			buf.writeDouble(payload.pivotX);
+			buf.writeDouble(payload.pivotY);
+			buf.writeDouble(payload.pivotZ);
+			buf.writeDouble(payload.normalX);
+			buf.writeDouble(payload.normalY);
+			buf.writeDouble(payload.normalZ);
+			buf.writeDouble(payload.downX);
+			buf.writeDouble(payload.downY);
+			buf.writeDouble(payload.downZ);
 		},
 		buf -> {
 			long windowHandle = buf.readLong();
@@ -36,10 +42,16 @@ public record SharedWindowImagePayload(long windowHandle, int frameNumber, int x
 			int dataLength = buf.readVarInt();
 			byte[] imageData = new byte[dataLength];
 			buf.readBytes(imageData);
-			double posX = buf.readDouble();
-			double posY = buf.readDouble();
-			double posZ = buf.readDouble();
-			return new SharedWindowImagePayload(windowHandle, frameNumber, x, y, width, height, imageData, posX, posY, posZ);
+			double pivotX = buf.readDouble();
+			double pivotY = buf.readDouble();
+			double pivotZ = buf.readDouble();
+			double normalX = buf.readDouble();
+			double normalY = buf.readDouble();
+			double normalZ = buf.readDouble();
+			double downX = buf.readDouble();
+			double downY = buf.readDouble();
+			double downZ = buf.readDouble();
+			return new SharedWindowImagePayload(windowHandle, frameNumber, x, y, width, height, imageData, pivotX, pivotY, pivotZ, normalX, normalY, normalZ, downX, downY, downZ);
 		}
 	);
 	

@@ -16,6 +16,7 @@ import dev.evvie.waylandcraft.shared.WindowPermission;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import dev.evvie.waylandcraft.network.PermissionResponsePayload;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * 客户端窗口接收处理器
@@ -120,19 +121,23 @@ public class SharedWindowClientHandler {
 	private static void handleWindowImageUpdate(SharedWindowImagePayload payload) {
 		WindowInfo info = remoteWindows.get(payload.windowHandle());
 		if(info == null) {
-			LOGGER.warn("[CLIENT] received image for unknown window 0x{} (remoteWindows has {} entries)", 
+			LOGGER.warn("[CLIENT] received image for unknown window 0x{} (remoteWindows has {} entries)",
 				Long.toHexString(payload.windowHandle()), remoteWindows.size());
 			return;
 		}
 		
-		LOGGER.info("[CLIENT] received image for window 0x{}: {} bytes, {}x{}", 
+		LOGGER.info("[CLIENT] received image for window 0x{}: {} bytes, {}x{}",
 			Long.toHexString(payload.windowHandle()), payload.imageData().length, payload.width(), payload.height());
 		
 		// 更新图像数据
 		info.updateImage(payload.imageData(), payload.width(), payload.height());
 		
-		// 更新所有者世界坐标
-		info.updateOwnerPos(payload.posX(), payload.posY(), payload.posZ());
+		// 更新窗口变换（pivot/normal/down）
+		info.updateTransform(
+			payload.pivotX(), payload.pivotY(), payload.pivotZ(),
+			payload.normalX(), payload.normalY(), payload.normalZ(),
+			payload.downX(), payload.downY(), payload.downZ()
+		);
 		
 		// 更新RemoteWindowRenderer
 		WaylandCraft instance = WaylandCraft.instance;
@@ -161,7 +166,7 @@ public class SharedWindowClientHandler {
 		// 更新权限
 		info.setPermission(payload.permission());
 		
-		LOGGER.info("Permission updated for window 0x{}: {}", 
+		LOGGER.info("Permission updated for window 0x{}: {}",
 			Long.toHexString(payload.windowHandle()), payload.permission());
 	}
 	
@@ -205,8 +210,8 @@ public class SharedWindowClientHandler {
 				display.updatePosition(info.x(), info.y());
 				display.updateSize(info.width(), info.height());
 				display.setVisible(info.visible());
-				// 更新所有者世界坐标
-				display.setWorldPosition(info.ownerPosX(), info.ownerPosY(), info.ownerPosZ());
+				// 传递窗口变换
+				display.setTransform(info.pivot(), info.normal(), info.down());
 				break;
 			}
 		}
@@ -219,7 +224,7 @@ public class SharedWindowClientHandler {
 		SharedWindowRegisterPayload payload = new SharedWindowRegisterPayload(windowHandle, windowTitle);
 		ClientPlayNetworking.send(payload);
 		
-		LOGGER.info("Requested window registration: 0x{} - {}", 
+		LOGGER.info("Requested window registration: 0x{} - {}",
 			Long.toHexString(windowHandle), windowTitle);
 	}
 	
@@ -235,7 +240,7 @@ public class SharedWindowClientHandler {
 	/**
 	 * 发送交互事件
 	 */
-	public static void sendInteraction(long windowHandle, SharedWindowInteractionPayload.InteractionType type, 
+	public static void sendInteraction(long windowHandle, SharedWindowInteractionPayload.InteractionType type,
 			double x, double y, int button, int key) {
 		UUID senderUUID = Minecraft.getInstance().player != null ? Minecraft.getInstance().player.getUUID() : null;
 		SharedWindowInteractionPayload payload = new SharedWindowInteractionPayload(
@@ -274,7 +279,9 @@ public class SharedWindowClientHandler {
 		private byte[] imageData;
 		private int imageWidth, imageHeight;
 		
-		private double ownerPosX, ownerPosY, ownerPosZ;
+		private Vec3 pivot = new Vec3(0, 0, 0);
+		private Vec3 normal = new Vec3(0, 0, 1);
+		private Vec3 down = new Vec3(0, -1, 0);
 		
 		public WindowInfo(long windowHandle, UUID ownerUUID, String title, WindowPermission permission) {
 			this.windowHandle = windowHandle;
@@ -304,6 +311,10 @@ public class SharedWindowClientHandler {
 		public int imageWidth() { return imageWidth; }
 		public int imageHeight() { return imageHeight; }
 		
+		public Vec3 pivot() { return pivot; }
+		public Vec3 normal() { return normal; }
+		public Vec3 down() { return down; }
+		
 		public void setPermission(WindowPermission permission) {
 			this.permission = permission;
 		}
@@ -322,14 +333,12 @@ public class SharedWindowClientHandler {
 			this.imageHeight = height;
 		}
 		
-		public void updateOwnerPos(double x, double y, double z) {
-			this.ownerPosX = x;
-			this.ownerPosY = y;
-			this.ownerPosZ = z;
+		public void updateTransform(double pivotX, double pivotY, double pivotZ,
+				double normalX, double normalY, double normalZ,
+				double downX, double downY, double downZ) {
+			this.pivot = new Vec3(pivotX, pivotY, pivotZ);
+			this.normal = new Vec3(normalX, normalY, normalZ);
+			this.down = new Vec3(downX, downY, downZ);
 		}
-		
-		public double ownerPosX() { return ownerPosX; }
-		public double ownerPosY() { return ownerPosY; }
-		public double ownerPosZ() { return ownerPosZ; }
 	}
 }

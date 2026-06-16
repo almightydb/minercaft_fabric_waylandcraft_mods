@@ -1,5 +1,7 @@
 package dev.evvie.waylandcraft.render;
 
+import java.util.function.Function;
+
 import org.jetbrains.annotations.Nullable;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -12,6 +14,8 @@ import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import dev.evvie.waylandcraft.shared.WindowPermission;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.Camera;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 
@@ -111,7 +115,16 @@ public class SharedWindowDisplay {
 	}
 	
 	/**
-	 * 设置所有者世界坐标（窗口显示在该位置）
+	 * 设置窗口变换（来自发送者的原始WindowDisplay的pivot/normal/down）
+	 */
+	public void setTransform(Vec3 pivot, Vec3 normal, Vec3 down) {
+		this.pivot = pivot;
+		this.normal = normal;
+		this.down = down;
+	}
+	
+	/**
+	 * 设置所有者世界坐标（窗口显示在该位置）— 兼容旧接口
 	 */
 	public void setWorldPosition(double x, double y, double z) {
 		this.pivot = new Vec3(x, y, z);
@@ -198,7 +211,7 @@ public class SharedWindowDisplay {
 	}
 	
 	/**
-	 * 渲染共享窗口
+	 * 渲染共享窗口 — 使用与WindowDisplay.render相同的WINDOW_CUTOUT管线
 	 */
 	public void render(LevelRenderContext ctx) {
 		if(!visible) return;
@@ -220,26 +233,34 @@ public class SharedWindowDisplay {
 			}
 		}
 		
-		// 获取渲染所需的各种向量
-		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
-		Vec3 originRel = origin().subtract(cameraPos);
-		
+		// 获取渲染所需的各种向量 — 与WindowDisplay.render一致
 		Vec3 localX = localX();
 		Vec3 localY = localY();
 		
-		// 计算四个角的位置
+		Vec3 cameraPos = ctx.levelState().cameraRenderState.pos;
+		Vec3 originRel = origin().subtract(cameraPos);
+		
+		// 计算四个角的位置（无xoff/yoff，因为远程纹理没有这个概念）
 		Vec3 tl = new Vec3(0, 0, 0);
 		Vec3 bl = localY.scale(renderHeight);
 		Vec3 br = bl.add(localX.scale(renderWidth));
 		Vec3 tr = localX.scale(renderWidth);
 		
-		// 渲染纹理
+		// 渲染纹理 — 使用WINDOW_CUTOUT管线（与renderFramebuffer相同的着色器和管线）
 		PoseStack poseStack = ctx.poseStack();
+		SubmitNodeCollector collector = ctx.submitNodeCollector();
 		poseStack.pushPose();
 		poseStack.translate(originRel.x, originRel.y, originRel.z);
 		
-		// 使用RenderUtils渲染纹理
-		RenderUtils.renderRemoteTexture(textureLocation, poseStack, ctx.submitNodeCollector(), tl, bl, br, tr);
+		// 前面 — 使用WINDOW_CUTOUT渲染类型（双面渲染，与renderFramebuffer一致）
+		RenderType cutoutType = RenderUtils.WINDOW_CUTOUT.apply(textureLocation);
+		collector.submitCustomGeometry(poseStack, cutoutType,
+			new RenderUtils.FramebufferRenderInstance(tl, bl, br, tr, false));
+		
+		// 背面 — 使用WINDOW_BACKGROUND_CUTOUT渲染类型
+		RenderType bgType = RenderUtils.WINDOW_BACKGROUND_CUTOUT.apply(textureLocation);
+		collector.submitCustomGeometry(poseStack, bgType,
+			new RenderUtils.FramebufferRenderInstance(tl, bl, br, tr, true));
 		
 		poseStack.popPose();
 	}
