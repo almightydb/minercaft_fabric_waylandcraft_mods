@@ -197,9 +197,9 @@ public class WindowShareManager {
 			return;
 		}
 		
-		// 发送图像数据到服务器（使用缩放后的尺寸）
-		int scaledW = (int)(toplevel.geometry.width() * captureConfig.scale);
-		int scaledH = (int)(toplevel.geometry.height() * captureConfig.scale);
+		// 使用原始窗口尺寸（非缩放），接收端根据这个尺寸计算世界大小
+		int originalW = toplevel.geometry.width();
+		int originalH = toplevel.geometry.height();
 		
 		// 从本地WindowDisplay获取窗口变换（pivot/normal/down）
 		double pivotX = 0, pivotY = 0, pivotZ = 0;
@@ -221,7 +221,7 @@ public class WindowShareManager {
 		
 		SharedWindowImagePayload imagePayload = new SharedWindowImagePayload(
 			state.windowHandle, 0, 0, 0,
-			scaledW, scaledH,
+			originalW, originalH,
 			processedData,
 			pivotX, pivotY, pivotZ,
 			normalX, normalY, normalZ,
@@ -229,7 +229,7 @@ public class WindowShareManager {
 		);
 		ClientPlayNetworking.send(imagePayload);
 		
-		LOGGER.info("[SHARE] sent image payload: {} bytes, {}x{}", processedData.length, scaledW, scaledH);
+		LOGGER.info("[SHARE] sent image payload: {} bytes, {}x{}", processedData.length, originalW, originalH);
 		
 		// 更新统计信息
 		state.lastUpdateTime = System.currentTimeMillis();

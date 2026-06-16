@@ -183,6 +183,26 @@ public class RenderUtils {
 		collector.submitCustomGeometry(poseStack, renderType.apply(textureLocation), new FramebufferRenderInstance(tl, bl, br, tr, true));
 	}
 	
+	/**
+	 * 渲染远程帧缓冲纹理 — V坐标翻转版本
+	 * 远程纹理通过glReadPixels捕获是top-down的，但shader UV假设bottom-up
+	 * 需要翻转V坐标(0↔1)来纠正上下方向
+	 */
+	public static void renderRemoteFramebufferTexture(Identifier textureLocation, PoseStack poseStack, SubmitNodeCollector collector, boolean cutout, Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr) {
+		if(textureLocation == null) return;
+		
+		Function<Identifier, RenderType> renderType;
+		
+		// Front quad — V flipped
+		if(WaylandCraft.instance.settings.getAntialiasing()) renderType = cutout ? WINDOW_CUTOUT_ANTIALIAS : WINDOW_TRANSLUCENT_ANTIALIAS;
+		else renderType = cutout ? WINDOW_CUTOUT : WINDOW_TRANSLUCENT;
+		collector.submitCustomGeometry(poseStack, renderType.apply(textureLocation), new FlippedVFramebufferRenderInstance(tl, bl, br, tr, false));
+		
+		// Back quad — V flipped
+		renderType = cutout ? WINDOW_BACKGROUND_CUTOUT : WINDOW_BACKGROUND_TRANSLUCENT;
+		collector.submitCustomGeometry(poseStack, renderType.apply(textureLocation), new FlippedVFramebufferRenderInstance(tl, bl, br, tr, true));
+	}
+	
 	public static final record FramebufferRenderInstance(Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr, boolean reverse) implements CustomGeometryRenderer {
 		
 		@Override
@@ -198,6 +218,32 @@ public class RenderUtils {
 				buffer.addVertex(pose, br.toVector3f()).setUv(1.0f, 1.0f);
 				buffer.addVertex(pose, bl.toVector3f()).setUv(0.0f, 1.0f);
 				buffer.addVertex(pose, tl.toVector3f()).setUv(0.0f, 0.0f);
+			}
+		}
+		
+	}
+	
+	/**
+	 * V坐标翻转的渲染实例 — 用于远程纹理（glReadPixels是top-down的）
+	 * UV的V坐标翻转：0→1, 1→0
+	 */
+	public static final record FlippedVFramebufferRenderInstance(Vec3 tl, Vec3 bl, Vec3 br, Vec3 tr, boolean reverse) implements CustomGeometryRenderer {
+		
+		@Override
+		public void render(Pose pose, VertexConsumer buffer) {
+			if(!reverse) {
+				// 正面：V翻转（0→1, 1→0）
+				buffer.addVertex(pose, tl.toVector3f()).setUv(0.0f, 1.0f);
+				buffer.addVertex(pose, bl.toVector3f()).setUv(0.0f, 0.0f);
+				buffer.addVertex(pose, br.toVector3f()).setUv(1.0f, 0.0f);
+				buffer.addVertex(pose, tr.toVector3f()).setUv(1.0f, 1.0f);
+			}
+			else {
+				// 背面：V翻转 + 顺序反转
+				buffer.addVertex(pose, tr.toVector3f()).setUv(1.0f, 1.0f);
+				buffer.addVertex(pose, br.toVector3f()).setUv(1.0f, 0.0f);
+				buffer.addVertex(pose, bl.toVector3f()).setUv(0.0f, 0.0f);
+				buffer.addVertex(pose, tl.toVector3f()).setUv(0.0f, 1.0f);
 			}
 		}
 		

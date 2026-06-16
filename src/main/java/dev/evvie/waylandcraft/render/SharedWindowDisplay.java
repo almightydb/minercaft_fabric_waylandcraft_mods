@@ -250,8 +250,8 @@ public class SharedWindowDisplay {
 		PoseStack poseStack = ctx.poseStack();
 		poseStack.pushPose();
 		poseStack.translate(originRel.x, originRel.y, originRel.z);
-		// 使用与WindowDisplay完全相同的渲染管线（cutout=true，和原始一致）
-		RenderUtils.renderFramebufferTexture(textureLocation, poseStack, ctx.submitNodeCollector(), true, tl, bl, br, tr);
+		// 使用V-flip版本的渲染管线（远程纹理是top-down的，需要翻转V坐标）
+		RenderUtils.renderRemoteFramebufferTexture(textureLocation, poseStack, ctx.submitNodeCollector(), true, tl, bl, br, tr);
 		poseStack.popPose();
 	}
 	
