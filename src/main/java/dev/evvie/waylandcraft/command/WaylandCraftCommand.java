@@ -1,6 +1,5 @@
 package dev.evvie.waylandcraft.command;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -359,54 +358,10 @@ public class WaylandCraftCommand {
 	}
 
 	/**
-	 * 通过ProcessBuilder启动应用，设置Wayland环境变量
+	 * 启动应用 - 使用原生execApp（Rust层正确设置WAYLAND_DISPLAY）
 	 */
 	private static boolean launchApp(WaylandCraft wlc, DesktopEntry entry) {
-		if(entry.exec == null || entry.exec.isEmpty()) {
-			return wlc.bridge.execApp(entry.appId);
-		}
-		try {
-			String exec = entry.exec.replaceAll("%[fFuUdDnNickvm]", "").trim();
-			String[] parts = exec.split("\\s+");
-
-			String socketName = wlc.bridge.getSocket();
-			if(socketName == null || socketName.isEmpty()) {
-				return wlc.bridge.execApp(entry.appId);
-			}
-
-			String runtimeDir = findRuntimeDir(socketName);
-
-			ProcessBuilder pb = new ProcessBuilder(parts);
-			pb.environment().put("WAYLAND_DISPLAY", socketName);
-			if(runtimeDir != null) {
-				pb.environment().put("XDG_RUNTIME_DIR", runtimeDir);
-			}
-			pb.environment().put("GDK_BACKEND", "wayland");
-			pb.environment().put("QT_QPA_PLATFORM", "wayland");
-			pb.environment().put("MOZ_ENABLE_WAYLAND", "1");
-			pb.environment().put("DISPLAY", "");
-			pb.redirectErrorStream(true);
-			pb.start();
-			return true;
-		} catch(Exception e) {
-			return wlc.bridge.execApp(entry.appId);
-		}
-	}
-
-	private static String findRuntimeDir(String socketName) {
-		String envDir = System.getenv("XDG_RUNTIME_DIR");
-		if(envDir != null && new File(envDir, socketName).exists()) {
-			return envDir;
-		}
-		File runUser = new File("/run/user");
-		if(runUser.isDirectory()) {
-			for(File uidDir : runUser.listFiles()) {
-				if(uidDir.isDirectory() && new File(uidDir, socketName).exists()) {
-					return uidDir.getAbsolutePath();
-				}
-			}
-		}
-		return null;
+		return wlc.bridge.execApp(entry.appId);
 	}
 
 	private static int removeWindowItem(CommandContext<FabricClientCommandSource> context) {

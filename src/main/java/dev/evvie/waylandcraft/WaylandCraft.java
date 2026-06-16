@@ -626,6 +626,32 @@ public class WaylandCraft implements ClientModInitializer {
 			return true;
 		}
 		
+		// 悬停在窗口上时，支持修饰键控制
+		if(hoveredDisplay != null && hoveredDisplay.dist >= 0) {
+			boolean ctrl = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL);
+			boolean alt = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_LEFT_ALT);
+			
+			WLCAbstractWindow window = hoveredDisplay.target.window;
+			if(window instanceof WLCToplevel) {
+				WindowDisplay display = getDisplay((WLCToplevel) window);
+				if(display != null) {
+					if(ctrl && alt) {
+						// Ctrl+Alt+滚轮 = 缩放
+						display.adjustScale(scrollY);
+						return true;
+					} else if(ctrl) {
+						// Ctrl+滚轮 = 旋转
+						display.rotateBy(scrollY * 0.1);
+						return true;
+					} else {
+						// 普通滚轮 = 前后距离
+						display.adjustAnchorDistance(scrollY);
+						return true;
+					}
+				}
+			}
+		}
+		
 		if(hoveredDisplay != null) {
 			if(hoveredDisplay.dist < 0) return true;
 			

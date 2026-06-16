@@ -37,6 +37,9 @@ public class WindowDisplay {
 	private Vec3 down = new Vec3(0, -1, 0);
 
 	public double anchorDistance = 2.0;
+	
+	// 视觉缩放倍数（不影响实际窗口分辨率）
+	public double viewScale = 1.0;
 
 	private int width;
 	private int height;
@@ -72,11 +75,11 @@ public class WindowDisplay {
 	}
 	
 	public Vec3 localX() {
-		return right().scale(pixelScale());
+		return right().scale(pixelScale() * viewScale);
 	}
 	
 	public Vec3 localY() {
-		return down.scale(pixelScale());
+		return down.scale(pixelScale() * viewScale);
 	}
 	
 	// World coordinates of the origin of the root surface surface-local coordinate space
@@ -174,6 +177,28 @@ public class WindowDisplay {
 
 	public void adjustAnchorDistance(double delta) {
 		this.anchorDistance = Math.clamp(this.anchorDistance + delta * 0.1d, 0.5d, 20d);
+	}
+	
+	/**
+	 * 绕法线轴旋转窗口（Roll）
+	 * @param angleDelta 弧度增量
+	 */
+	public void rotateBy(double angleDelta) {
+		// 绕normal轴旋转down向量
+		double cos = Math.cos(angleDelta);
+		double sin = Math.sin(angleDelta);
+		Vec3 right = right();
+		
+		// Rodrigues旋转：down绕normal旋转
+		Vec3 newDown = down.scale(cos).add(right.scale(sin)).normalize();
+		this.down = newDown;
+	}
+	
+	/**
+	 * 调整视觉缩放
+	 */
+	public void adjustScale(double delta) {
+		this.viewScale = Math.clamp(this.viewScale + delta * 0.05d, 0.2d, 5.0d);
 	}
 	
 	public void anchorToPosView(Vec3 pos, Vec3 look, Vec3 up) {
