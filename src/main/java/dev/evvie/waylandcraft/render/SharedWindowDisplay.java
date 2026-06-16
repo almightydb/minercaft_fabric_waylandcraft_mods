@@ -211,8 +211,7 @@ public class SharedWindowDisplay {
 	}
 	
 	/**
-	 * 渲染共享窗口 — 使用与WindowDisplay.render相同的WINDOW_CUTOUT管线
-	 * 始终面向相机（翻转normal/down避免看到镜像背面）
+	 * 渲染共享窗口 — 始终面向相机，使用REMOTE_TEXTURE管线
 	 */
 	public void render(LevelRenderContext ctx) {
 		if(!visible) return;
@@ -221,7 +220,7 @@ public class SharedWindowDisplay {
 		Identifier textureLocation = renderer.getTextureLocation_obj(windowHandle);
 		if(textureLocation == null) return;
 		
-		// 从renderer获取实际纹理尺寸（首次渲染时本地width/height可能为0）
+		// 从renderer获取实际纹理尺寸
 		int renderWidth = this.width;
 		int renderHeight = this.height;
 		if(renderWidth <= 0 || renderHeight <= 0) {
@@ -234,7 +233,7 @@ public class SharedWindowDisplay {
 			}
 		}
 		
-		// 获取渲染所需的各种向量 — 与WindowDisplay.render一致
+		// 获取渲染所需的各种向量
 		Vec3 localX = localX();
 		Vec3 localY = localY();
 		
@@ -246,9 +245,9 @@ public class SharedWindowDisplay {
 		boolean flipped = cameraDir.dot(normal) > 0;
 		
 		if(flipped) {
-			// 翻转法线和向下向量，让窗口面向相机
+			// 翻转法线和向下向量
 			// right = normal×down → (-normal)×(-down) = normal×down，不变
-			// 但localX和localY方向反转，需要交换tl↔tr来纠正UV镜像
+			// 但localY方向反转，需要交换tl↔tr来纠正UV镜像
 			localX = normal.reverse().cross(down.reverse()).scale(pixelScale());
 			localY = down.reverse().scale(pixelScale());
 		}
@@ -259,29 +258,17 @@ public class SharedWindowDisplay {
 		Vec3 br = bl.add(localX.scale(renderWidth));
 		Vec3 tr = localX.scale(renderWidth);
 		
-		// 渲染纹理 — 使用WINDOW_CUTOUT管线（与renderFramebuffer相同的着色器和管线）
 		PoseStack poseStack = ctx.poseStack();
-		SubmitNodeCollector collector = ctx.submitNodeCollector();
 		poseStack.pushPose();
 		poseStack.translate(originRel.x, originRel.y, originRel.z);
 		
-		// 前面 — 使用WINDOW_CUTOUT渲染类型（双面渲染，与renderFramebuffer一致）
-		RenderType cutoutType = RenderUtils.WINDOW_CUTOUT.apply(textureLocation);
-		
 		if(!flipped) {
-			// 正常朝向：标准UV映射
-			collector.submitCustomGeometry(poseStack, cutoutType,
-				new RenderUtils.FramebufferRenderInstance(tl, bl, br, tr, false));
+			// 正常朝向：标准渲染
+			RenderUtils.renderRemoteTexture(textureLocation, poseStack, ctx.submitNodeCollector(), tl, bl, br, tr);
 		} else {
 			// 翻转朝向：交换左右顶点纠正水平镜像
-			collector.submitCustomGeometry(poseStack, cutoutType,
-				new RenderUtils.FramebufferRenderInstance(tr, br, bl, tl, false));
+			RenderUtils.renderRemoteTexture(textureLocation, poseStack, ctx.submitNodeCollector(), tr, br, bl, tl);
 		}
-		
-		// 背面 — 使用WINDOW_BACKGROUND_CUTOUT渲染类型
-		RenderType bgType = RenderUtils.WINDOW_BACKGROUND_CUTOUT.apply(textureLocation);
-		collector.submitCustomGeometry(poseStack, bgType,
-			new RenderUtils.FramebufferRenderInstance(tl, bl, br, tr, true));
 		
 		poseStack.popPose();
 	}
