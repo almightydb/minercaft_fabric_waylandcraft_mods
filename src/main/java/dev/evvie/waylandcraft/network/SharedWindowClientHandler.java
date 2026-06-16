@@ -132,6 +132,9 @@ public class SharedWindowClientHandler {
 		// 更新图像数据
 		info.updateImage(payload.imageData(), payload.width(), payload.height());
 		
+		// 同步更新窗口尺寸（payload.width/height是原始窗口尺寸，用于世界空间渲染）
+		info.updateState(info.x(), info.y(), payload.width(), payload.height(), info.visible());
+		
 		// 更新窗口变换（pivot/normal/down）
 		info.updateTransform(
 			payload.pivotX(), payload.pivotY(), payload.pivotZ(),
