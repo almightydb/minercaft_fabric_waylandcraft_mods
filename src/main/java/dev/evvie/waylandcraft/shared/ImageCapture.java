@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 import java.util.zip.Deflater;
 
 import javax.imageio.IIOImage;
@@ -15,6 +16,9 @@ import javax.imageio.stream.MemoryCacheImageOutputStream;
 
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL15;
+import org.lwjgl.opengl.GL21;
+import org.lwjgl.opengl.GL30;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,8 +29,13 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import dev.evvie.waylandcraft.render.WindowFramebuffer;
 
 /**
- * 图像捕获和压缩模块
- * 负责从OpenGL framebuffer捕获图像并压缩为JPEG格式
+ * 图像捕获和压缩模块（优化版）
+ * 
+ * 优化内容：
+ * 1. PBO双缓冲异步回读（消除GPU→CPU同步阻塞）
+ * 2. GPU侧缩放（glBlitFramebuffer，跳过CPU scaleImage）
+ * 3. 直接RGBA→JPEG编码（跳过BufferedImage中间层）
+ * 4. 像素差异检测（跳过无变化帧）
  */
 public class ImageCapture {
 	
@@ -42,66 +51,28 @@ public class ImageCapture {
 	private static final int MAX_WIDTH = 1920;
 	private static final int MAX_HEIGHT = 1080;
 	
-	// 可复用的ByteBuffer，避免每帧分配
+	// PBO双缓冲
+	private static int[] pboIds = null;
+	private static int pboIndex = 0;
+	private static int pboWidth = 0;
+	private static int pboHeight = 0;
+	
+	// GPU缩放用临时FBO+纹理
+	private static int scaleFbo = 0;
+	private static int scaleTex = 0;
+	private static int scaleFboW = 0;
+	private static int scaleFboH = 0;
+	
+	// 可复用的ByteBuffer（非PBO回退路径）
 	private static ByteBuffer reusableBuffer = null;
 	private static int lastBufferWidth = 0;
 	private static int lastBufferHeight = 0;
 	
-	/**
-	 * 从当前OpenGL framebuffer捕获图像
-	 * @param x 起始X坐标
-	 * @param y 起始Y坐标
-	 * @param width 宽度
-	 * @param height 高度
-	 * @return JPEG压缩的图像数据，失败返回null
-	 */
-	@Nullable
-	public static byte[] captureFramebuffer(int x, int y, int width, int height) {
-		return captureFramebuffer(x, y, width, height, DEFAULT_SCALE, DEFAULT_JPEG_QUALITY);
-	}
+	// 像素差异检测
+	private static byte[] lastRawFrame = null;
 	
 	/**
-	 * 从当前OpenGL framebuffer捕获图像
-	 */
-	@Nullable
-	public static byte[] captureFramebuffer(int x, int y, int width, int height, float scale, float quality) {
-		// 限制尺寸
-		width = Math.min(width, MAX_WIDTH);
-		height = Math.min(height, MAX_HEIGHT);
-		
-		// 计算缩放后的尺寸
-		int scaledWidth = (int)(width * scale);
-		int scaledHeight = (int)(height * scale);
-		
-		if(scaledWidth <= 0 || scaledHeight <= 0) {
-			LOGGER.warn("Invalid capture dimensions: {}x{}", scaledWidth, scaledHeight);
-			return null;
-		}
-		
-		try {
-			// 从OpenGL读取像素数据
-			ByteBuffer buffer = ByteBuffer.allocateDirect(width * height * 4);
-			GL11.glReadPixels(x, y, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
-			
-			// 转换为BufferedImage
-			BufferedImage image = pixelBufferToImage(buffer, width, height);
-			
-			// 缩放图像
-			if(scale != 1.0f) {
-				image = scaleImage(image, scaledWidth, scaledHeight);
-			}
-			
-			// 压缩为JPEG
-			return compressToJpeg(image, quality);
-			
-		} catch(Exception e) {
-			LOGGER.error("Failed to capture framebuffer", e);
-			return null;
-		}
-	}
-	
-	/**
-	 * 从WindowFramebuffer捕获图像
+	 * 从WindowFramebuffer捕获图像（主入口，带全部优化）
 	 */
 	@Nullable
 	public static byte[] captureFromFramebuffer(WindowFramebuffer framebuffer) {
@@ -109,7 +80,12 @@ public class ImageCapture {
 	}
 	
 	/**
-	 * 从WindowFramebuffer捕获图像
+	 * 从WindowFramebuffer捕获图像（优化版）
+	 * 
+	 * 流程：
+	 * 1. GPU侧缩放（glBlitFramebuffer）
+	 * 2. PBO异步回读
+	 * 3. 直接RGBA→JPEG编码
 	 */
 	@Nullable
 	public static byte[] captureFromFramebuffer(WindowFramebuffer framebuffer, float scale, float quality) {
@@ -122,10 +98,10 @@ public class ImageCapture {
 			return null;
 		}
 		
-		int width = framebuffer.getWidth();
-		int height = framebuffer.getHeight();
+		int srcW = framebuffer.getWidth();
+		int srcH = framebuffer.getHeight();
 		
-		if(width <= 0 || height <= 0) {
+		if(srcW <= 0 || srcH <= 0) {
 			return null;
 		}
 		
@@ -135,64 +111,64 @@ public class ImageCapture {
 		}
 		
 		try {
-			// 通过 GlTexture 获取 GL 纹理 ID，创建临时 FBO 读取像素
 			int glTexId = ((com.mojang.blaze3d.opengl.GlTexture) colorTex).glId();
 			
-			int tempFbo = org.lwjgl.opengl.GL30.glGenFramebuffers();
-			org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, tempFbo);
-			org.lwjgl.opengl.GL30.glFramebufferTexture2D(
-				org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER,
-				org.lwjgl.opengl.GL30.GL_COLOR_ATTACHMENT0,
-				GL11.GL_TEXTURE_2D, glTexId, 0
+			// 计算缩放后尺寸
+			int dstW = Math.max(1, (int)(srcW * scale));
+			int dstH = Math.max(1, (int)(srcH * scale));
+			dstW = Math.min(dstW, MAX_WIDTH);
+			dstH = Math.min(dstH, MAX_HEIGHT);
+			
+			// Step 1: GPU侧缩放 — glBlitFramebuffer
+			int readFbo = GL30.glGenFramebuffers();
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
+			GL30.glFramebufferTexture2D(GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, glTexId, 0);
+			
+			int readStatus = GL30.glCheckFramebufferStatus(GL30.GL_READ_FRAMEBUFFER);
+			if(readStatus != GL30.GL_FRAMEBUFFER_COMPLETE) {
+				LOGGER.error("Source FBO incomplete: 0x{}", Integer.toHexString(readStatus));
+				GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+				GL30.glDeleteFramebuffers(readFbo);
+				return null;
+			}
+			
+			// 确保缩放FBO存在且尺寸正确
+			ensureScaleFbo(dstW, dstH);
+			
+			// Blit: 源FBO → 缩放FBO（GPU做缩放，零CPU开销）
+			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, scaleFbo);
+			GL30.glBlitFramebuffer(
+				0, 0, srcW, srcH,        // 源矩形
+				0, 0, dstW, dstH,        // 目标矩形
+				GL11.GL_COLOR_BUFFER_BIT,
+				GL30.GL_LINEAR            // 双线性插值
 			);
 			
-			// FBO完整性检查
-			int status = org.lwjgl.opengl.GL30.glCheckFramebufferStatus(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER);
-			if(status != org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_COMPLETE) {
-				LOGGER.error("FBO incomplete: 0x{}", Integer.toHexString(status));
-				org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
-				org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
+			// 检查blit错误
+			int blitError = GL11.glGetError();
+			if(blitError != GL11.GL_NO_ERROR) {
+				LOGGER.error("glBlitFramebuffer error: 0x{}", Integer.toHexString(blitError));
+				GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+				GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
+				GL30.glDeleteFramebuffers(readFbo);
 				return null;
 			}
 			
-			// 复用ByteBuffer
-			int needed = width * height * 4;
-			if(reusableBuffer == null || lastBufferWidth != width || lastBufferHeight != height) {
-				reusableBuffer = ByteBuffer.allocateDirect(needed);
-				lastBufferWidth = width;
-				lastBufferHeight = height;
-			} else {
-				reusableBuffer.clear();
-			}
+			// Step 2: PBO异步回读
+			ByteBuffer pixelData = readPixelsViaPbo(dstW, dstH);
 			
-			GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, reusableBuffer);
+			// 清理临时FBO
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
+			GL30.glDeleteFramebuffers(readFbo);
 			
-			// GL错误检查
-			int glError = GL11.glGetError();
-			if(glError != GL11.GL_NO_ERROR) {
-				LOGGER.error("glReadPixels error: 0x{}", Integer.toHexString(glError));
-				org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
-				org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
+			if(pixelData == null) {
 				return null;
 			}
 			
-			// 清理临时 FBO
-			org.lwjgl.opengl.GL30.glBindFramebuffer(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER, 0);
-			org.lwjgl.opengl.GL30.glDeleteFramebuffers(tempFbo);
+			// Step 3: 直接RGBA→JPEG编码（跳过BufferedImage中间层）
+			return compressToJpegDirect(pixelData, dstW, dstH, quality, true);
 			
-			// 转换为 BufferedImage
-			BufferedImage image = pixelBufferToImage(reusableBuffer, width, height);
-			
-			// 缩放
-			if(scale != 1.0f) {
-				int scaledW = (int)(width * scale);
-				int scaledH = (int)(height * scale);
-				if(scaledW > 0 && scaledH > 0) {
-					image = scaleImage(image, scaledW, scaledH);
-				}
-			}
-			
-			return compressToJpeg(image, quality);
 		} catch(Exception e) {
 			LOGGER.error("Failed to capture from framebuffer", e);
 			return null;
@@ -200,72 +176,289 @@ public class ImageCapture {
 	}
 	
 	/**
-	 * 将OpenGL像素缓冲区转换为BufferedImage
+	 * 从WindowFramebuffer捕获原始RGBA数据（用于diff检测）
 	 */
-	private static BufferedImage pixelBufferToImage(ByteBuffer buffer, int width, int height) {
-		BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+	@Nullable
+	public static byte[] captureFromFramebufferRaw(WindowFramebuffer framebuffer, float scale) {
+		if(!framebuffer.isValid()) return null;
 		
-		// OpenGL的像素是从左下角开始的，需要翻转
-		for(int y = 0; y < height; y++) {
-			for(int x = 0; x < width; x++) {
-				int index = ((height - y - 1) * width + x) * 4;
-				
-				int r = buffer.get(index) & 0xFF;
-				int g = buffer.get(index + 1) & 0xFF;
-				int b = buffer.get(index + 2) & 0xFF;
-				int a = buffer.get(index + 3) & 0xFF;
-				
-				int argb = (a << 24) | (r << 16) | (g << 8) | b;
-				image.setRGB(x, y, argb);
+		var target = framebuffer.getRenderTarget();
+		if(target == null) return null;
+		
+		int srcW = framebuffer.getWidth();
+		int srcH = framebuffer.getHeight();
+		if(srcW <= 0 || srcH <= 0) return null;
+		
+		var colorTex = target.getColorTexture();
+		if(colorTex == null || colorTex.isClosed()) return null;
+		
+		try {
+			int glTexId = ((com.mojang.blaze3d.opengl.GlTexture) colorTex).glId();
+			
+			int dstW = Math.max(1, (int)(srcW * scale));
+			int dstH = Math.max(1, (int)(srcH * scale));
+			dstW = Math.min(dstW, MAX_WIDTH);
+			dstH = Math.min(dstH, MAX_HEIGHT);
+			
+			// 源FBO
+			int readFbo = GL30.glGenFramebuffers();
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
+			GL30.glFramebufferTexture2D(GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, glTexId, 0);
+			
+			// GPU缩放
+			ensureScaleFbo(dstW, dstH);
+			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, scaleFbo);
+			GL30.glBlitFramebuffer(0, 0, srcW, srcH, 0, 0, dstW, dstH, GL11.GL_COLOR_BUFFER_BIT, GL30.GL_LINEAR);
+			
+			// 同步读取（raw模式不用PBO，避免延迟）
+			int needed = dstW * dstH * 4;
+			if(reusableBuffer == null || lastBufferWidth != dstW || lastBufferHeight != dstH) {
+				reusableBuffer = ByteBuffer.allocateDirect(needed);
+				lastBufferWidth = dstW;
+				lastBufferHeight = dstH;
+			} else {
+				reusableBuffer.clear();
+			}
+			
+			// 从缩放FBO读取
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, scaleFbo);
+			GL11.glReadPixels(0, 0, dstW, dstH, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, reusableBuffer);
+			
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
+			GL30.glDeleteFramebuffers(readFbo);
+			
+			// 转为byte[]
+			byte[] result = new byte[needed];
+			reusableBuffer.rewind();
+			reusableBuffer.get(result);
+			return result;
+			
+		} catch(Exception e) {
+			LOGGER.error("Failed to capture raw frame", e);
+			return null;
+		}
+	}
+	
+	/**
+	 * 检测像素帧是否有显著变化
+	 * 采样1/16像素，计算变化百分比
+	 * 
+	 * @param currentFrame 当前帧RGBA数据
+	 * @param threshold 变化阈值（0.0-1.0），默认0.02（2%）
+	 * @return true if significant change detected
+	 */
+	public static boolean hasSignificantChange(byte[] currentFrame, float threshold) {
+		if(lastRawFrame == null || lastRawFrame.length != currentFrame.length) {
+			lastRawFrame = currentFrame.clone();
+			return true;
+		}
+		
+		int totalPixels = currentFrame.length / 4;
+		int sampleStep = 4; // 采样间隔，1/16像素
+		int sampled = 0;
+		int changed = 0;
+		
+		for(int i = 0; i < currentFrame.length; i += 4 * sampleStep) {
+			sampled++;
+			// 比较RGB（跳过Alpha）
+			if(currentFrame[i] != lastRawFrame[i] ||
+			   currentFrame[i+1] != lastRawFrame[i+1] ||
+			   currentFrame[i+2] != lastRawFrame[i+2]) {
+				changed++;
 			}
 		}
 		
-		return image;
+		float changeRatio = sampled > 0 ? (float)changed / sampled : 1.0f;
+		
+		// 更新缓存
+		lastRawFrame = currentFrame.clone();
+		
+		return changeRatio > threshold;
 	}
 	
 	/**
-	 * 缩放图像
-	 */
-	private static BufferedImage scaleImage(BufferedImage source, int targetWidth, int targetHeight) {
-		BufferedImage scaled = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
-		java.awt.Graphics2D g2d = scaled.createGraphics();
-		
-		// 设置高质量缩放
-		g2d.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, 
-			java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-		g2d.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, 
-			java.awt.RenderingHints.VALUE_RENDER_QUALITY);
-		g2d.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, 
-			java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-		
-		g2d.drawImage(source, 0, 0, targetWidth, targetHeight, null);
-		g2d.dispose();
-		
-		return scaled;
-	}
-	
-	/**
-	 * 压缩图像为JPEG格式（ARGB→RGB转换）
+	 * 通过PBO异步读取像素数据
+	 * 双缓冲：帧N写入PBO[A]，同时读取PBO[B]的上一帧数据
 	 */
 	@Nullable
-	public static byte[] compressToJpeg(BufferedImage image, float quality) {
+	private static ByteBuffer readPixelsViaPbo(int width, int height) {
+		int dataSize = width * height * 4;
+		
+		// 初始化PBO（首次或尺寸变化时）
+		if(pboIds == null || pboWidth != width || pboHeight != height) {
+			cleanupPbos();
+			pboIds = new int[2];
+			IntBuffer pboBuf = IntBuffer.wrap(pboIds);
+			GL15.glGenBuffers(pboBuf);
+			
+			for(int i = 0; i < 2; i++) {
+				GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, pboIds[i]);
+				GL15.glBufferData(GL21.GL_PIXEL_PACK_BUFFER, dataSize, GL15.GL_STREAM_READ);
+			}
+			GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+			
+			pboWidth = width;
+			pboHeight = height;
+			pboIndex = 0;
+			LOGGER.debug("Initialized PBOs: {}x{} ({} bytes each)", width, height, dataSize);
+		}
+		
+		int readIndex = pboIndex;        // 当前帧写入这个PBO
+		int mapIndex = 1 - pboIndex;     // 读取上一帧的PBO
+		pboIndex = 1 - pboIndex;         // 交替
+		
+		// 将当前帧异步DMA到PBO[readIndex]
+		GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, pboIds[readIndex]);
+		// 重新分配buffer确保尺寸匹配
+		GL15.glBufferData(GL21.GL_PIXEL_PACK_BUFFER, dataSize, GL15.GL_STREAM_READ);
+		// 从缩放FBO读取到PBO
+		GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, scaleFbo);
+		GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, 0L);
+		GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+		GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+		
+		// 映射PBO[mapIndex]（上一帧的数据）
+		GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, pboIds[mapIndex]);
+		ByteBuffer mapped = GL15.glMapBuffer(GL21.GL_PIXEL_PACK_BUFFER, GL15.GL_READ_ONLY);
+		
+		if(mapped == null) {
+			// 首帧或映射失败 — 回退到同步读取
+			GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+			LOGGER.debug("PBO map returned null (first frame?), falling back to sync read");
+			return readPixelsSync(width, height);
+		}
+		
+		// 复制数据出来
+		ByteBuffer result = ByteBuffer.allocateDirect(dataSize);
+		result.put(mapped);
+		result.rewind();
+		
+		GL15.glUnmapBuffer(GL21.GL_PIXEL_PACK_BUFFER);
+		GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+		
+		return result;
+	}
+	
+	/**
+	 * 同步读取像素（PBO回退路径）
+	 */
+	private static ByteBuffer readPixelsSync(int width, int height) {
+		int needed = width * height * 4;
+		if(reusableBuffer == null || lastBufferWidth != width || lastBufferHeight != height) {
+			reusableBuffer = ByteBuffer.allocateDirect(needed);
+			lastBufferWidth = width;
+			lastBufferHeight = height;
+		} else {
+			reusableBuffer.clear();
+		}
+		
+		GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, scaleFbo);
+		GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, reusableBuffer);
+		GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+		
+		int glError = GL11.glGetError();
+		if(glError != GL11.GL_NO_ERROR) {
+			LOGGER.error("glReadPixels error: 0x{}", Integer.toHexString(glError));
+			return null;
+		}
+		
+		reusableBuffer.rewind();
+		return reusableBuffer;
+	}
+	
+	/**
+	 * 确保GPU缩放FBO存在且尺寸正确
+	 */
+	private static void ensureScaleFbo(int width, int height) {
+		if(scaleFbo != 0 && scaleFboW == width && scaleFboH == height) {
+			return; // 已存在且尺寸匹配
+		}
+		
+		// 清理旧资源
+		if(scaleFbo != 0) {
+			GL30.glDeleteFramebuffers(scaleFbo);
+			GL11.glDeleteTextures(scaleTex);
+		}
+		
+		// 创建缩放纹理
+		scaleTex = GL11.glGenTextures();
+		GL11.glBindTexture(GL11.GL_TEXTURE_2D, scaleTex);
+		GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, width, height, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+		GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+		GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+		GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
+		
+		// 创建FBO并附加纹理
+		scaleFbo = GL30.glGenFramebuffers();
+		GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, scaleFbo);
+		GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, scaleTex, 0);
+		
+		int status = GL30.glCheckFramebufferStatus(GL30.GL_FRAMEBUFFER);
+		if(status != GL30.GL_FRAMEBUFFER_COMPLETE) {
+			LOGGER.error("Scale FBO incomplete: 0x{}", Integer.toHexString(status));
+		}
+		
+		GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, 0);
+		scaleFboW = width;
+		scaleFboH = height;
+		
+		LOGGER.debug("Created scale FBO: {}x{}", width, height);
+	}
+	
+	/**
+	 * 清理PBO资源
+	 */
+	private static void cleanupPbos() {
+		if(pboIds != null) {
+			GL15.glDeleteBuffers(IntBuffer.wrap(pboIds));
+			pboIds = null;
+		}
+		pboWidth = 0;
+		pboHeight = 0;
+	}
+	
+	/**
+	 * 直接从RGBA ByteBuffer编码为JPEG（跳过BufferedImage中间层）
+	 * 
+	 * @param rgbaBuffer RGBA像素数据（bottom-to-top if from PBO）
+	 * @param width 图像宽度
+	 * @param height 图像高度
+	 * @param quality JPEG质量 (0.0-1.0)
+	 * @param flipY 是否翻转Y轴（PBO数据是bottom-to-top）
+	 * @return JPEG压缩数据
+	 */
+	@Nullable
+	public static byte[] compressToJpegDirect(ByteBuffer rgbaBuffer, int width, int height, float quality, boolean flipY) {
 		try {
-			// JPEG不支持alpha通道，需要转为RGB
-			BufferedImage rgbImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
-			java.awt.Graphics2D g2d = rgbImage.createGraphics();
-			g2d.drawImage(image, 0, 0, null);
-			g2d.dispose();
+			// 直接填充RGB int数组（跳过ARGB中间步骤）
+			BufferedImage rgbImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+			int[] rgbPixels = new int[width * height];
 			
+			for(int y = 0; y < height; y++) {
+				// PBO数据是bottom-to-top，需要翻转
+				int srcY = flipY ? (height - 1 - y) : y;
+				int rowOffset = srcY * width * 4;
+				
+				for(int x = 0; x < width; x++) {
+					int pixelOffset = rowOffset + x * 4;
+					int r = rgbaBuffer.get(pixelOffset) & 0xFF;
+					int g = rgbaBuffer.get(pixelOffset + 1) & 0xFF;
+					int b = rgbaBuffer.get(pixelOffset + 2) & 0xFF;
+					// 跳过alpha（JPEG不支持）
+					rgbPixels[y * width + x] = (r << 16) | (g << 8) | b;
+				}
+			}
+			
+			rgbImage.setRGB(0, 0, width, height, rgbPixels, 0, width);
+			
+			// JPEG压缩
 			ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-			
 			ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
 			ImageWriteParam param = writer.getDefaultWriteParam();
-			
-			// 设置压缩质量
 			param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
 			param.setCompressionQuality(quality);
 			
-			// 写入JPEG数据
 			ImageOutputStream imageOutputStream = new MemoryCacheImageOutputStream(outputStream);
 			writer.setOutput(imageOutputStream);
 			writer.write(null, new IIOImage(rgbImage, null, null), param);
@@ -275,14 +468,107 @@ public class ImageCapture {
 			return outputStream.toByteArray();
 			
 		} catch(IOException e) {
+			LOGGER.error("Failed to compress image to JPEG (direct)", e);
+			return null;
+		}
+	}
+	
+	// ===== 保留旧方法以兼容其他调用点 =====
+	
+	@Nullable
+	public static byte[] captureFramebuffer(int x, int y, int width, int height) {
+		return captureFramebuffer(x, y, width, height, DEFAULT_SCALE, DEFAULT_JPEG_QUALITY);
+	}
+	
+	@Nullable
+	public static byte[] captureFramebuffer(int x, int y, int width, int height, float scale, float quality) {
+		width = Math.min(width, MAX_WIDTH);
+		height = Math.min(height, MAX_HEIGHT);
+		
+		int scaledWidth = (int)(width * scale);
+		int scaledHeight = (int)(height * scale);
+		
+		if(scaledWidth <= 0 || scaledHeight <= 0) {
+			LOGGER.warn("Invalid capture dimensions: {}x{}", scaledWidth, scaledHeight);
+			return null;
+		}
+		
+		try {
+			ByteBuffer buffer = ByteBuffer.allocateDirect(width * height * 4);
+			GL11.glReadPixels(x, y, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buffer);
+			
+			// 直接编码（旧路径不用PBO，但用直接编码）
+			if(scale != 1.0f) {
+				// 需要缩放 — 用旧的CPU路径
+				BufferedImage image = pixelBufferToImage(buffer, width, height);
+				image = scaleImage(image, scaledWidth, scaledHeight);
+				return compressToJpeg(image, quality);
+			} else {
+				return compressToJpegDirect(buffer, width, height, quality, true);
+			}
+		} catch(Exception e) {
+			LOGGER.error("Failed to capture framebuffer", e);
+			return null;
+		}
+	}
+	
+	// ===== 旧的辅助方法（保留兼容） =====
+	
+	private static BufferedImage pixelBufferToImage(ByteBuffer buffer, int width, int height) {
+		BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+		for(int y = 0; y < height; y++) {
+			for(int x = 0; x < width; x++) {
+				int index = ((height - y - 1) * width + x) * 4;
+				int r = buffer.get(index) & 0xFF;
+				int g = buffer.get(index + 1) & 0xFF;
+				int b = buffer.get(index + 2) & 0xFF;
+				int a = buffer.get(index + 3) & 0xFF;
+				int argb = (a << 24) | (r << 16) | (g << 8) | b;
+				image.setRGB(x, y, argb);
+			}
+		}
+		return image;
+	}
+	
+	private static BufferedImage scaleImage(BufferedImage source, int targetWidth, int targetHeight) {
+		BufferedImage scaled = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+		java.awt.Graphics2D g2d = scaled.createGraphics();
+		g2d.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, 
+			java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+		g2d.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, 
+			java.awt.RenderingHints.VALUE_RENDER_QUALITY);
+		g2d.drawImage(source, 0, 0, targetWidth, targetHeight, null);
+		g2d.dispose();
+		return scaled;
+	}
+	
+	@Nullable
+	public static byte[] compressToJpeg(BufferedImage image, float quality) {
+		try {
+			BufferedImage rgbImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+			java.awt.Graphics2D g2d = rgbImage.createGraphics();
+			g2d.drawImage(image, 0, 0, null);
+			g2d.dispose();
+			
+			ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+			ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+			ImageWriteParam param = writer.getDefaultWriteParam();
+			param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+			param.setCompressionQuality(quality);
+			
+			ImageOutputStream imageOutputStream = new MemoryCacheImageOutputStream(outputStream);
+			writer.setOutput(imageOutputStream);
+			writer.write(null, new IIOImage(rgbImage, null, null), param);
+			writer.dispose();
+			imageOutputStream.close();
+			
+			return outputStream.toByteArray();
+		} catch(IOException e) {
 			LOGGER.error("Failed to compress image to JPEG", e);
 			return null;
 		}
 	}
 	
-	/**
-	 * 使用Deflater压缩数据（替代方案）
-	 */
 	@Nullable
 	public static byte[] compressWithDeflater(byte[] data) {
 		Deflater deflater = new Deflater(Deflater.BEST_SPEED);
@@ -301,21 +587,15 @@ public class ImageCapture {
 		return outputStream.toByteArray();
 	}
 	
-	/**
-	 * 计算两帧之间的差异
-	 * @return 差异数据，如果没有差异返回null
-	 */
 	@Nullable
 	public static byte[] calculateDiff(byte[] previousFrame, byte[] currentFrame) {
 		if(previousFrame == null || currentFrame == null) {
 			return currentFrame;
 		}
-		
 		if(previousFrame.length != currentFrame.length) {
 			return currentFrame;
 		}
 		
-		// 简单的差异计算：只传输变化的字节
 		ByteArrayOutputStream diffStream = new ByteArrayOutputStream();
 		int changedPixels = 0;
 		
@@ -328,7 +608,6 @@ public class ImageCapture {
 			}
 		}
 		
-		// 如果变化超过50%，直接传输完整帧
 		if(changedPixels > currentFrame.length / 2) {
 			return currentFrame;
 		}
@@ -336,32 +615,94 @@ public class ImageCapture {
 		return diffStream.toByteArray();
 	}
 	
-	/**
-	 * 获取推荐的捕获配置
-	 */
 	public static CaptureConfig getRecommendedConfig(int width, int height) {
-		// 根据窗口大小推荐配置
 		if(width * height > 1920 * 1080) {
-			return new CaptureConfig(0.25f, 0.5f, 10); // 大窗口：低质量、低帧率
+			return new CaptureConfig(0.25f, 0.5f, 10);
 		} else if(width * height > 1280 * 720) {
-			return new CaptureConfig(0.5f, 0.6f, 15); // 中等窗口
+			return new CaptureConfig(0.5f, 0.6f, 15);
 		} else {
-			return new CaptureConfig(0.75f, 0.7f, 20); // 小窗口：高质量
+			return new CaptureConfig(0.75f, 0.7f, 20);
 		}
+	}
+	
+	/**
+	 * 清理所有GPU资源（mod卸载时调用）
+	 */
+	public static void cleanup() {
+		cleanupPbos();
+		if(scaleFbo != 0) {
+			GL30.glDeleteFramebuffers(scaleFbo);
+			scaleFbo = 0;
+		}
+		if(scaleTex != 0) {
+			GL11.glDeleteTextures(scaleTex);
+			scaleTex = 0;
+		}
+		lastRawFrame = null;
+		reusableBuffer = null;
 	}
 	
 	/**
 	 * 捕获配置
 	 */
 	public static class CaptureConfig {
-		public final float scale;
-		public final float quality;
-		public final int maxFps;
+		public float scale;
+		public float quality;
+		public int maxFps;
+		public boolean diffUpdate;
+		public int maxBitrate;
+		public int frameBuffer;
+		public int latencyComp;
+		public boolean prediction;
+		public String compression;
+		public float diffThreshold;  // 新增：像素变化阈值
 		
 		public CaptureConfig(float scale, float quality, int maxFps) {
-			this.scale = scale;
-			this.quality = quality;
-			this.maxFps = maxFps;
+			this(scale, quality, maxFps, true, 0, 3, 0, false, "jpeg", 0.02f);
+		}
+		
+		public CaptureConfig(float scale, float quality, int maxFps,
+				boolean diffUpdate, int maxBitrate, int frameBuffer,
+				int latencyComp, boolean prediction, String compression) {
+			this(scale, quality, maxFps, diffUpdate, maxBitrate, frameBuffer, latencyComp, prediction, compression, 0.02f);
+		}
+		
+		public CaptureConfig(float scale, float quality, int maxFps,
+				boolean diffUpdate, int maxBitrate, int frameBuffer,
+				int latencyComp, boolean prediction, String compression, float diffThreshold) {
+			this.scale = Math.max(0.1f, Math.min(1.0f, scale));
+			this.quality = Math.max(0.1f, Math.min(1.0f, quality));
+			this.maxFps = Math.max(5, Math.min(120, maxFps));
+			this.diffUpdate = diffUpdate;
+			this.maxBitrate = Math.max(0, maxBitrate);
+			this.frameBuffer = Math.max(1, Math.min(10, frameBuffer));
+			this.latencyComp = Math.max(0, Math.min(500, latencyComp));
+			this.prediction = prediction;
+			this.compression = compression;
+			this.diffThreshold = Math.max(0.001f, Math.min(1.0f, diffThreshold));
+		}
+		
+		public static CaptureConfig highPerformance() {
+			return new CaptureConfig(0.25f, 0.5f, 60, true, 1000, 2, 50, true, "jpeg", 0.03f);
+		}
+		
+		public static CaptureConfig highQuality() {
+			return new CaptureConfig(1.0f, 1.0f, 30, true, 0, 5, 0, false, "jpeg", 0.01f);
+		}
+		
+		public static CaptureConfig balanced() {
+			return new CaptureConfig(0.5f, 0.7f, 30, true, 2000, 3, 20, false, "jpeg", 0.02f);
+		}
+		
+		public static CaptureConfig lowLatency() {
+			return new CaptureConfig(0.35f, 0.6f, 60, true, 1500, 1, 0, true, "jpeg", 0.05f);
+		}
+		
+		public String getSummary() {
+			return String.format(
+				"scale=%.2f quality=%.2f fps=%d diff=%s bitrate=%dkbps buffer=%d latency=%dms pred=%s comp=%s diffThreshold=%.3f",
+				scale, quality, maxFps, diffUpdate, maxBitrate, frameBuffer, latencyComp, prediction, compression, diffThreshold
+			);
 		}
 	}
 }

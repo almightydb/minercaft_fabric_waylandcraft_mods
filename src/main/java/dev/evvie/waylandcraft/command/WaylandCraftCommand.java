@@ -4,16 +4,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 
 import dev.evvie.waylandcraft.WaylandCraft;
 import dev.evvie.waylandcraft.bridge.WLCToplevel;
+import dev.evvie.waylandcraft.capture.PipeWireCaptureManager;
 import dev.evvie.waylandcraft.desktop.DesktopEntry;
 import dev.evvie.waylandcraft.network.PermissionCommandPayload;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
+import dev.evvie.waylandcraft.shared.ImageCapture;
 import dev.evvie.waylandcraft.shared.WindowPermission;
+import dev.evvie.waylandcraft.shared.WindowShareManager;
+import dev.evvie.waylandcraft.utils.X11WindowLister;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -34,17 +39,24 @@ public class WaylandCraftCommand {
 		dispatcher.register(
 			ClientCommands.literal("wl")
 				.then(ClientCommands.literal("list")
-					.executes(WaylandCraftCommand::listWindows)
 					.then(ClientCommands.literal("windows")
 						.executes(WaylandCraftCommand::listWindows)
 					)
 					.then(ClientCommands.literal("apps")
 						.executes(WaylandCraftCommand::listApps)
 					)
+					.then(ClientCommands.literal("desktop")
+						.executes(WaylandCraftCommand::listDesktopWindows)
+					)
 				)
 				.then(ClientCommands.literal("give")
-					.then(ClientCommands.argument("app_name", StringArgumentType.greedyString())
-						.executes(WaylandCraftCommand::giveWindowItem)
+					.then(ClientCommands.literal("create")
+						.then(ClientCommands.argument("app_name", StringArgumentType.greedyString())
+							.executes(WaylandCraftCommand::createWindow)
+						)
+					)
+					.then(ClientCommands.literal("capture")
+						.executes(WaylandCraftCommand::captureWindow)
 					)
 				)
 				.then(ClientCommands.literal("remove")
@@ -67,8 +79,71 @@ public class WaylandCraftCommand {
 					)
 				)
 				.then(ClientCommands.literal("share")
-					.then(ClientCommands.argument("handle", StringArgumentType.word())
-						.executes(WaylandCraftCommand::shareWindow)
+					.then(ClientCommands.literal("start")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.executes(WaylandCraftCommand::shareWindow)
+						)
+					)
+					.then(ClientCommands.literal("quality")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.then(ClientCommands.argument("scale", FloatArgumentType.floatArg(0.1f, 1.0f))
+								.then(ClientCommands.argument("quality", FloatArgumentType.floatArg(0.1f, 1.0f))
+									.then(ClientCommands.argument("fps", IntegerArgumentType.integer(5, 120))
+										.executes(WaylandCraftCommand::setShareQuality)
+									)
+								)
+							)
+						)
+					)
+					.then(ClientCommands.literal("quality-reset")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.executes(WaylandCraftCommand::resetShareQuality)
+						)
+					)
+					.then(ClientCommands.literal("config")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.then(ClientCommands.argument("param", StringArgumentType.word())
+								.suggests((ctx, builder) -> {
+									for (String p : new String[]{"scale", "quality", "fps", "diff", "bitrate", "buffer", "latency", "prediction", "compression", "diffThreshold"})
+										builder.suggest(p);
+									return builder.buildFuture();
+								})
+								.then(ClientCommands.argument("value", StringArgumentType.word())
+									.executes(WaylandCraftCommand::setShareConfig)
+								)
+							)
+						)
+					)
+					.then(ClientCommands.literal("preset")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.then(ClientCommands.argument("preset", StringArgumentType.word())
+								.suggests((ctx, builder) -> {
+									for (String p : new String[]{"performance", "quality", "balanced", "lowlatency"})
+										builder.suggest(p);
+									return builder.buildFuture();
+								})
+								.executes(WaylandCraftCommand::applySharePreset)
+							)
+						)
+					)
+					.then(ClientCommands.literal("info")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.executes(WaylandCraftCommand::showShareConfig)
+						)
+					)
+					.then(ClientCommands.literal("resolution")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.then(ClientCommands.argument("width", IntegerArgumentType.integer(1, 3840))
+								.then(ClientCommands.argument("height", IntegerArgumentType.integer(1, 2160))
+									.executes(WaylandCraftCommand::setShareResolution)
+								)
+							)
+						)
+					)
+					.then(ClientCommands.literal("stats")
+						.then(ClientCommands.argument("handle", StringArgumentType.word())
+							.executes(WaylandCraftCommand::showShareStats)
+						)
 					)
 				)
 				.then(ClientCommands.literal("unshare")
@@ -285,7 +360,7 @@ public class WaylandCraftCommand {
 		return 1;
 	}
 
-	private static int giveWindowItem(CommandContext<FabricClientCommandSource> context) {
+	private static int createWindow(CommandContext<FabricClientCommandSource> context) {
 		FabricClientCommandSource source = context.getSource();
 		String appName = StringArgumentType.getString(context, "app_name").trim();
 		WaylandCraft wlc = WaylandCraft.instance;
@@ -362,6 +437,78 @@ public class WaylandCraftCommand {
 	 */
 	private static boolean launchApp(WaylandCraft wlc, DesktopEntry entry) {
 		return wlc.bridge.execApp(entry.appId);
+	}
+
+	// ===== 桌面窗口捕获 =====
+
+	/**
+	 * 列出可捕获的桌面窗口（通过 JNA X11）
+	 */
+	private static int listDesktopWindows(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+
+		try {
+			// 通过本地库获取桌面窗口（自动检测 wlr/GNOME//proc）
+			List<X11WindowLister.WindowInfo> windowInfos = X11WindowLister.getDesktopWindows();
+
+			source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+			source.sendFeedback(Component.literal("§6 §lWaylandCraft §r§7 Desktop Windows §7(" + windowInfos.size() + " total)§r"));
+			source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+
+			if (windowInfos.isEmpty()) {
+				source.sendFeedback(Component.literal(" §7No desktop windows detected§r"));
+			} else {
+			for (X11WindowLister.WindowInfo info : windowInfos) {
+				String desc = !info.appId.isEmpty() && !info.appId.equals(info.title) ? " §7- §8" + info.appId + "§r" : "";
+				source.sendFeedback(Component.literal(" §a[" + info.hash + "]§r §b" + info.title + "§r" + desc + " §7pid:" + info.pid + "§r"));
+			}
+			}
+
+			source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+			source.sendFeedback(Component.literal(" §7Use §e/wl give capture <name>§7 to capture§r"));
+			return windowInfos.size();
+		} catch (Exception e) {
+			source.sendError(Component.literal("§c✘ Failed to list desktop windows: " + e.getMessage() + "§r"));
+			return 0;
+		}
+	}
+
+	/**
+	 * 捕获桌面窗口（通过 XDG Desktop Portal ScreenCast）
+	 * 会弹出窗口选择对话框，用户选择后自动开始捕获
+	 */
+	private static int captureWindow(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+
+		if (wlc == null || wlc.bridge == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		source.sendFeedback(Component.literal("§e⏳ 正在启动 Portal 捕获...请在弹窗中选择要共享的窗口§r"));
+
+		try {
+			// 启动 Portal ScreenCast 捕获（会弹出确认对话框）
+			PipeWireCaptureManager.CaptureSession session = wlc.captureManager.startCapture();
+
+			if (session == null) {
+				source.sendError(Component.literal("§c✘ Portal 捕获失败（可能被取消或超时）§r"));
+				return 0;
+			}
+
+			// 注册虚拟 Toplevel 用于渲染
+			session.registerToplevel("Portal Capture");
+
+			source.sendFeedback(Component.literal("§a✔ Portal 捕获已启动§r"));
+			source.sendFeedback(Component.literal(" §7窗口将在游戏世界中显示§r"));
+			return 1;
+
+		} catch (Exception e) {
+			source.sendError(Component.literal("§c✘ 捕获失败: " + e.getMessage() + "§r"));
+			return 0;
+		}
 	}
 
 	private static int removeWindowItem(CommandContext<FabricClientCommandSource> context) {
@@ -480,6 +627,251 @@ public class WaylandCraftCommand {
 			SharedWindowClientHandler.requestWindowUnregister(toplevel.getHandle());
 		}
 		source.sendFeedback(Component.literal("§a✔ Unshared: §f" + getWindowDisplayName(toplevel) + "§r"));
+		return 1;
+	}
+
+	private static int setShareQuality(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		long handle = toplevel.getHandle();
+		float scale = FloatArgumentType.getFloat(context, "scale");
+		float quality = FloatArgumentType.getFloat(context, "quality");
+		int fps = IntegerArgumentType.getInteger(context, "fps");
+
+		ImageCapture.CaptureConfig config = new ImageCapture.CaptureConfig(scale, quality, fps);
+		wlc.windowShareManager.setPerWindowConfig(handle, config);
+
+		source.sendFeedback(Component.literal("§a✔ Quality set for §f" + getWindowDisplayName(toplevel) + "§r"));
+		source.sendFeedback(Component.literal(" §7Scale: §e" + scale + "§7 Quality: §e" + quality + "§7 FPS: §e" + fps + "§r"));
+		return 1;
+	}
+
+	private static int resetShareQuality(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		long handle = toplevel.getHandle();
+		wlc.windowShareManager.clearPerWindowConfig(handle);
+
+		source.sendFeedback(Component.literal("§a✔ Quality reset for §f" + getWindowDisplayName(toplevel) + "§r (using global config)"));
+		return 1;
+	}
+
+	private static int setShareConfig(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		String param = StringArgumentType.getString(context, "param").toLowerCase();
+		String value = StringArgumentType.getString(context, "value").toLowerCase();
+
+		// 获取当前配置（如果没有则创建默认）
+		WindowShareManager.ShareState state = wlc.windowShareManager.getShareState(toplevel.getHandle());
+		ImageCapture.CaptureConfig config = state != null && state.perWindowConfig != null 
+			? state.perWindowConfig 
+			: ImageCapture.CaptureConfig.balanced();
+
+		try {
+			switch(param) {
+				case "scale" -> config.scale = Float.parseFloat(value);
+				case "quality" -> config.quality = Float.parseFloat(value);
+				case "fps" -> config.maxFps = Integer.parseInt(value);
+				case "diff" -> config.diffUpdate = Boolean.parseBoolean(value);
+				case "bitrate" -> config.maxBitrate = Integer.parseInt(value);
+				case "buffer" -> config.frameBuffer = Integer.parseInt(value);
+				case "latency" -> config.latencyComp = Integer.parseInt(value);
+				case "prediction" -> config.prediction = Boolean.parseBoolean(value);
+				case "compression" -> config.compression = value;
+				case "diffThreshold" -> config.diffThreshold = Float.parseFloat(value);
+				default -> {
+					source.sendError(Component.literal("§c✘ Unknown parameter: §f" + param + "§r"));
+					source.sendFeedback(Component.literal(" §7Available: scale, quality, fps, diff, bitrate, buffer, latency, prediction, compression, diffThreshold§r"));
+					return 0;
+				}
+			}
+			wlc.windowShareManager.setPerWindowConfig(toplevel.getHandle(), config);
+			source.sendFeedback(Component.literal("§a✔ §f" + param + "§r = §e" + value + "§r for §f" + getWindowDisplayName(toplevel) + "§r"));
+		} catch(NumberFormatException e) {
+			source.sendError(Component.literal("§c✘ Invalid value: §f" + value + "§r"));
+			return 0;
+		}
+		return 1;
+	}
+
+	private static int applySharePreset(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		String preset = StringArgumentType.getString(context, "preset").toLowerCase();
+		ImageCapture.CaptureConfig config;
+
+		switch(preset) {
+			case "performance" -> config = ImageCapture.CaptureConfig.highPerformance();
+			case "quality" -> config = ImageCapture.CaptureConfig.highQuality();
+			case "balanced" -> config = ImageCapture.CaptureConfig.balanced();
+			case "lowlatency" -> config = ImageCapture.CaptureConfig.lowLatency();
+			default -> {
+				source.sendError(Component.literal("§c✘ Unknown preset: §f" + preset + "§r"));
+				source.sendFeedback(Component.literal(" §7Available: performance, quality, balanced, lowlatency§r"));
+				return 0;
+			}
+		}
+
+		wlc.windowShareManager.setPerWindowConfig(toplevel.getHandle(), config);
+		source.sendFeedback(Component.literal("§a✔ Applied preset §e" + preset + "§r to §f" + getWindowDisplayName(toplevel) + "§r"));
+		source.sendFeedback(Component.literal(" §7" + config.getSummary() + "§r"));
+		return 1;
+	}
+
+	private static int showShareConfig(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		WindowShareManager.ShareState state = wlc.windowShareManager.getShareState(toplevel.getHandle());
+		ImageCapture.CaptureConfig config = state != null && state.perWindowConfig != null 
+			? state.perWindowConfig 
+			: null;
+
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal("§6 §lWaylandCraft §r§7 Share Config: §f" + getWindowDisplayName(toplevel) + "§r"));
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+
+		if(config != null) {
+			source.sendFeedback(Component.literal(" §7Scale: §e" + config.scale + "§r"));
+			source.sendFeedback(Component.literal(" §7Quality: §e" + config.quality + "§r"));
+			source.sendFeedback(Component.literal(" §7FPS: §e" + config.maxFps + "§r"));
+			source.sendFeedback(Component.literal(" §7Diff Update: §e" + config.diffUpdate + "§r"));
+			source.sendFeedback(Component.literal(" §7Bitrate: §e" + (config.maxBitrate > 0 ? config.maxBitrate + "kbps" : "unlimited") + "§r"));
+			source.sendFeedback(Component.literal(" §7Buffer: §e" + config.frameBuffer + " frames§r"));
+			source.sendFeedback(Component.literal(" §7Latency Comp: §e" + config.latencyComp + "ms§r"));
+			source.sendFeedback(Component.literal(" §7Prediction: §e" + config.prediction + "§r"));
+			source.sendFeedback(Component.literal(" §7Compression: §e" + config.compression + "§r"));
+			source.sendFeedback(Component.literal(" §7Diff Threshold: §e" + String.format("%.3f", config.diffThreshold) + "§r"));
+		} else {
+			source.sendFeedback(Component.literal(" §7Using global config§r"));
+		}
+
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal(" §7Presets: §eperformance§7, §equality§7, §ebalanced§7, §elowlatency§r"));
+		source.sendFeedback(Component.literal(" §7Use §e/wl share config <handle> <param> <value>§7 to set§r"));
+		return 1;
+	}
+
+	/**
+	 * 设置共享窗口的捕获目标分辨率
+	 * /wl share resolution <handle> <width> <height>
+	 */
+	private static int setShareResolution(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		int targetW = IntegerArgumentType.getInteger(context, "width");
+		int targetH = IntegerArgumentType.getInteger(context, "height");
+
+		int srcW = toplevel.geometry.width();
+		int srcH = toplevel.geometry.height();
+		if(srcW <= 0 || srcH <= 0) {
+			source.sendError(Component.literal("§c✘ Window has no geometry§r"));
+			return 0;
+		}
+
+		float scale = Math.min(1.0f, Math.min((float)targetW / srcW, (float)targetH / srcH));
+		scale = Math.max(0.1f, scale);
+
+		ImageCapture.CaptureConfig config = new ImageCapture.CaptureConfig(scale, 0.7f, 20);
+		wlc.windowShareManager.setPerWindowConfig(toplevel.getHandle(), config);
+
+		int actualW = (int)(srcW * scale);
+		int actualH = (int)(srcH * scale);
+
+		source.sendFeedback(Component.literal("§a✔ Resolution set to §e" + actualW + "x" + actualH + "§a (scale=" + String.format("%.2f", scale) + ")§r"));
+		return 1;
+	}
+
+	/**
+	 * 显示共享窗口统计信息
+	 * /wl share stats <handle>
+	 */
+	private static int showShareStats(CommandContext<FabricClientCommandSource> context) {
+		FabricClientCommandSource source = context.getSource();
+		WaylandCraft wlc = WaylandCraft.instance;
+		if(wlc == null || wlc.windowShareManager == null) {
+			source.sendError(Component.literal("§c✘ WaylandCraft not initialized§r"));
+			return 0;
+		}
+
+		String handleStr = StringArgumentType.getString(context, "handle");
+		WLCToplevel toplevel = findToplevelByHandle(source, handleStr);
+		if(toplevel == null) return 0;
+
+		WindowShareManager.ShareState state = wlc.windowShareManager.getShareState(toplevel.getHandle());
+		if(state == null) {
+			source.sendError(Component.literal("§c✘ Window §e" + handleStr + "§c is not being shared§r"));
+			return 0;
+		}
+
+		long uptime = (System.currentTimeMillis() - state.startTime) / 1000;
+		float avgFps = uptime > 0 ? (float)state.frameCount / uptime : 0;
+		String avgSize = state.frameCount > 0 ? (state.totalBytes / state.frameCount / 1024) + "KB" : "N/A";
+
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal("§6 §lWaylandCraft §r§7 Share Stats: §f" + getWindowDisplayName(toplevel) + "§r"));
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
+		source.sendFeedback(Component.literal(" §7Frames: §e" + state.frameCount + "§7 (skipped: §e" + state.skippedFrames + "§7, rate-limited: §e" + state.rateLimitedFrames + "§7)§r"));
+		source.sendFeedback(Component.literal(" §7Total: §e" + (state.totalBytes / 1024) + "KB§7 in §e" + uptime + "s§r"));
+		source.sendFeedback(Component.literal(" §7Avg Frame: §e" + avgSize + "§7, Avg FPS: §e" + String.format("%.1f", avgFps) + "§r"));
+		source.sendFeedback(Component.literal(" §7Current FPS: §e" + state.currentFps + "§7, Bitrate: §e" + state.currentBitrate + "kbps§r"));
+		source.sendFeedback(Component.literal(" §7Adaptive Scale: §e" + String.format("%.2f", wlc.windowShareManager.getAdaptiveScaleMultiplier()) + "§r"));
+		source.sendFeedback(Component.literal(" §7Bandwidth Util: §e" + String.format("%.1f%%", wlc.windowShareManager.getBitrateUtilization() * 100) + "§r"));
+		source.sendFeedback(Component.literal("§6▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"));
 		return 1;
 	}
 

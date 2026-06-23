@@ -1,43 +1,32 @@
-# gradle
-
-.gradle/
+# Build output
 build/
-out/
-classes/
+*.class
+META-INF/
+dev/
 
-# eclipse
+# Gradle
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
 
-*.launch
+# Rust
+native/target/
+native/Cargo.lock
 
-# idea
-
+# IDE
 .idea/
 *.iml
-*.ipr
-*.iws
-
-# vscode
-
-.settings/
 .vscode/
-bin/
-.classpath
-.project
 
-# macos
+# OS
+.DS_Store
+Thumbs.db
 
-*.DS_Store
+# Logs
+*.log
+server.log
 
-# fabric
-
-run/
-
-# java
-
-hs_err_*.log
-replay_*.log
-*.hprof
-*.jfr
-
-# directory used by actions runner
-native-libs
+# Large files
+*.jar
+*.so
+*.dll
+*.dylib

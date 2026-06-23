@@ -41,6 +41,7 @@ import dev.evvie.waylandcraft.settings.WaylandCraftSettingsManager;
 import dev.evvie.waylandcraft.network.SharedWindowClientHandler;
 import dev.evvie.waylandcraft.command.WaylandCraftCommand;
 import dev.evvie.waylandcraft.utils.CursorShape;
+import dev.evvie.waylandcraft.capture.PipeWireCaptureManager;
 import dev.evvie.waylandcraft.shared.RemoteWindowRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -91,6 +92,7 @@ public class WaylandCraft implements ClientModInitializer {
 	
 	public WindowItemManager itemManager = new WindowItemManager();
 	public XDGDesktopManager xdgManager;
+	public PipeWireCaptureManager captureManager = new PipeWireCaptureManager();
 	
 	public KeyMapping keyOpenScreen;
 	public KeyMapping keyOpenAppLauncher;
@@ -626,30 +628,28 @@ public class WaylandCraft implements ClientModInitializer {
 			return true;
 		}
 		
-		// 悬停在窗口上时，支持修饰键控制
+		// 悬停在窗口上时，修饰键+滚轮控制窗口变换
 		if(hoveredDisplay != null && hoveredDisplay.dist >= 0) {
 			boolean ctrl = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL);
 			boolean alt = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), GLFW.GLFW_KEY_LEFT_ALT);
 			
-			WLCAbstractWindow window = hoveredDisplay.target.window;
-			if(window instanceof WLCToplevel) {
-				WindowDisplay display = getDisplay((WLCToplevel) window);
-				if(display != null) {
-					if(ctrl && alt) {
-						// Ctrl+Alt+滚轮 = 缩放
-						display.adjustScale(scrollY);
-						return true;
-					} else if(ctrl) {
-						// Ctrl+滚轮 = 旋转
-						display.rotateBy(scrollY * 0.1);
-						return true;
-					} else {
-						// 普通滚轮 = 前后距离
-						display.adjustAnchorDistance(scrollY);
+			if(ctrl || alt) {
+				WLCAbstractWindow window = hoveredDisplay.target.window;
+				if(window instanceof WLCToplevel) {
+					WindowDisplay display = getDisplay((WLCToplevel) window);
+					if(display != null) {
+						if(ctrl && alt) {
+							// Ctrl+Alt+滚轮 = 缩放
+							display.adjustScale(scrollY);
+						} else if(ctrl) {
+							// Ctrl+滚轮 = 旋转
+							display.rotateBy(scrollY * 0.1);
+						}
 						return true;
 					}
 				}
 			}
+			// 无修饰键 → 不拦截，继续执行下面的 bridge.sendScroll
 		}
 		
 		if(hoveredDisplay != null) {

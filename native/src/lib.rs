@@ -46,6 +46,8 @@ use std::time::Duration;
 
 mod bridge;
 mod ddm;
+mod desktop_windows;
+mod portal_capture;
 mod egl;
 mod java_types;
 mod output;

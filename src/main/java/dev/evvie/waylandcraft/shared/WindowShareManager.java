@@ -20,37 +20,46 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * 窗口共享管理器
- * 协调窗口共享的完整流程
+ * 窗口共享管理器（优化版）
+ * 
+ * 优化内容：
+ * 1. 码率限速（Token Bucket）
+ * 2. 自适应质量（根据带宽利用率动态调整scale）
+ * 3. 像素差异检测（跳过无变化帧）
  */
 public class WindowShareManager {
 	
 	private static final Logger LOGGER = LoggerFactory.getLogger("waylandcraft-share-manager");
 	
-	// 客户端实例
 	private final WaylandCraft clientMod;
-	
-	// 服务器端实例
 	private final WaylandCraftCommon serverMod;
 	
-	// 图像捕获配置
 	private ImageCapture.CaptureConfig captureConfig;
-	
-	// 帧率控制器
 	private final FrameRateController frameRateController;
-	
-	// 差分更新管理器
 	private final DiffUpdateManager diffUpdateManager;
 	
-	// 共享状态: windowHandle -> ShareState
 	private final Map<Long, ShareState> shareStates = new ConcurrentHashMap<>();
-	
-	// 是否启用共享
 	private boolean sharingEnabled = true;
 	
-	/**
-	 * 构造函数（客户端）
-	 */
+	// === 码率限速 ===
+	private long bytesSentThisSecond = 0;
+	private long currentSecondStart = 0;
+	
+	// === 自适应质量 ===
+	private float adaptiveScaleMultiplier = 1.0f; // 乘以config.scale得到实际scale
+	private int adaptiveEvalCounter = 0;
+	private int adaptiveOverLimitCount = 0;    // 连续超限帧数
+	private int adaptiveUnderUtilCount = 0;    // 连续低利用帧数
+	private static final int ADAPTIVE_EVAL_INTERVAL = 60; // 每60帧评估一次
+	private static final float ADAPTIVE_SCALE_MIN = 0.1f;
+	private static final float ADAPTIVE_SCALE_MAX = 1.0f;
+	private static final float ADAPTIVE_SCALE_DOWN = 0.9f;  // 超限时降低10%
+	private static final float ADAPTIVE_SCALE_UP = 1.1f;    // 低利用时提高10%
+	
+	// === 帧间统计 ===
+	private long adaptiveFrameBytes = 0; // 当前评估周期内的总字节
+	private boolean lastFrameOverLimit = false;
+	
 	public WindowShareManager(WaylandCraft clientMod) {
 		this.clientMod = clientMod;
 		this.serverMod = null;
@@ -58,15 +67,10 @@ public class WindowShareManager {
 		this.frameRateController = new FrameRateController();
 		this.diffUpdateManager = new DiffUpdateManager();
 		
-		// 注册客户端事件
 		registerClientEvents();
-		
 		LOGGER.info("WindowShareManager initialized (client)");
 	}
 	
-	/**
-	 * 构造函数（服务器端）
-	 */
 	public WindowShareManager(WaylandCraftCommon serverMod) {
 		this.clientMod = null;
 		this.serverMod = serverMod;
@@ -77,45 +81,32 @@ public class WindowShareManager {
 		LOGGER.info("WindowShareManager initialized (server)");
 	}
 	
-	/**
-	 * 注册客户端事件
-	 */
 	private void registerClientEvents() {
-		// 玩家断开连接时清理
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
 			handleDisconnect();
 		});
 	}
 	
-	/**
-	 * 开始共享窗口
-	 */
 	public boolean startSharing(long windowHandle, String windowTitle) {
 		if(clientMod == null) {
 			LOGGER.warn("Cannot start sharing on server side");
 			return false;
 		}
 		
-		// 检查是否已经共享
 		if(shareStates.containsKey(windowHandle)) {
 			LOGGER.warn("Window 0x{} is already being shared", Long.toHexString(windowHandle));
 			return false;
 		}
 		
-		// 创建共享状态
 		ShareState state = new ShareState(windowHandle, windowTitle);
 		shareStates.put(windowHandle, state);
 		
-		// 发送注册请求到服务器
 		SharedWindowClientHandler.requestWindowRegister(windowHandle, windowTitle);
 		
 		LOGGER.info("Started sharing window 0x{}: {}", Long.toHexString(windowHandle), windowTitle);
 		return true;
 	}
 	
-	/**
-	 * 停止共享窗口
-	 */
 	public boolean stopSharing(long windowHandle) {
 		ShareState state = shareStates.remove(windowHandle);
 		if(state == null) {
@@ -123,10 +114,8 @@ public class WindowShareManager {
 			return false;
 		}
 		
-		// 发送注销请求到服务器
 		SharedWindowClientHandler.requestWindowUnregister(windowHandle);
 		
-		// 清理差分更新缓存
 		diffUpdateManager.clearWindow(windowHandle);
 		frameRateController.reset(windowHandle);
 		
@@ -134,74 +123,98 @@ public class WindowShareManager {
 		return true;
 	}
 	
-	/**
-	 * 更新共享窗口
-	 * 应该在每个客户端tick中调用
-	 */
 	public void update() {
 		if(clientMod == null || !sharingEnabled) return;
 		
-		// 遍历所有共享窗口
+		// 重置每秒码率计数器
+		long now = System.currentTimeMillis();
+		if(now - currentSecondStart > 1000) {
+			bytesSentThisSecond = 0;
+			currentSecondStart = now;
+		}
+		
 		for(ShareState state : shareStates.values()) {
 			updateSharedWindow(state);
 		}
 	}
 	
 	/**
-	 * 更新单个共享窗口
+	 * 更新单个共享窗口（带全部优化）
 	 */
 	private void updateSharedWindow(ShareState state) {
-		// 检查帧率限制
-		if(!frameRateController.shouldUpdate(state.windowHandle, captureConfig.maxFps)) {
+		ImageCapture.CaptureConfig effectiveConfig = state.getEffectiveConfig(captureConfig);
+		
+		// 帧率限制
+		if(!frameRateController.shouldUpdate(state.windowHandle, effectiveConfig.maxFps)) {
 			return;
 		}
 		
 		// 获取本地窗口
 		WLCToplevel toplevel = getLocalWindow(state.windowHandle);
-		if(toplevel == null) {
-			LOGGER.warn("[SHARE] toplevel is null for handle 0x{}", Long.toHexString(state.windowHandle));
-			return;
-		}
-		if(!toplevel.isMapped()) {
-			LOGGER.warn("[SHARE] toplevel not mapped for handle 0x{}", Long.toHexString(state.windowHandle));
+		if(toplevel == null || !toplevel.isMapped() || toplevel.framebuffer == null) {
 			return;
 		}
 		
-		// 捕获窗口图像 - 从窗口的framebuffer读取
-		if(toplevel.framebuffer == null) {
-			LOGGER.warn("[SHARE] framebuffer is null for handle 0x{}", Long.toHexString(state.windowHandle));
-			return;
+		// 计算实际使用的scale（自适应 × 配置）
+		float effectiveScale = effectiveConfig.scale * adaptiveScaleMultiplier;
+		effectiveScale = Math.max(0.1f, Math.min(1.0f, effectiveScale));
+		
+		// === 像素差异检测 ===
+		if(effectiveConfig.diffUpdate) {
+			byte[] rawFrame = ImageCapture.captureFromFramebufferRaw(toplevel.framebuffer, effectiveScale);
+			if(rawFrame != null) {
+				if(!ImageCapture.hasSignificantChange(rawFrame, effectiveConfig.diffThreshold)) {
+					// 无显著变化，跳过本帧
+					state.skippedFrames++;
+					return;
+				}
+			}
 		}
 		
-		LOGGER.info("[SHARE] capturing window 0x{} ({}x{})", 
-			Long.toHexString(state.windowHandle),
-			toplevel.framebuffer.getWidth(), toplevel.framebuffer.getHeight());
-		
+		// === 捕获（使用优化的PBO+GPU缩放+直接编码路径） ===
 		byte[] imageData = ImageCapture.captureFromFramebuffer(
 			toplevel.framebuffer,
-			captureConfig.scale,
-			captureConfig.quality
+			effectiveScale,
+			effectiveConfig.quality
 		);
 		
 		if(imageData == null) {
-			LOGGER.error("[SHARE] ImageCapture returned null!");
 			return;
 		}
 		
-		LOGGER.info("[SHARE] captured {} bytes JPEG", imageData.length);
+		// === 码率限速 ===
+		if(effectiveConfig.maxBitrate > 0) {
+			long maxBytesPerSecond = (long)effectiveConfig.maxBitrate * 1000 / 8; // kbps → bytes/sec
+			if(bytesSentThisSecond + imageData.length > maxBytesPerSecond) {
+				// 超过码率限制，跳过本帧
+				state.rateLimitedFrames++;
+				lastFrameOverLimit = true;
+				adaptiveOverLimitCount++;
+				adaptiveUnderUtilCount = 0;
+				return;
+			}
+			lastFrameOverLimit = false;
+		}
 		
-		// 处理差分更新
+		// === 自适应质量评估 ===
+		adaptiveEvalCounter++;
+		adaptiveFrameBytes += imageData.length;
+		
+		if(adaptiveEvalCounter >= ADAPTIVE_EVAL_INTERVAL) {
+			evaluateAdaptiveQuality(effectiveConfig);
+			adaptiveEvalCounter = 0;
+			adaptiveFrameBytes = 0;
+		}
+		
+		// 处理差分更新（当前已禁用，JPEG压缩数据diff无意义）
 		byte[] processedData = diffUpdateManager.processFrame(state.windowHandle, imageData);
-		if(processedData == null) {
-			LOGGER.warn("[SHARE] DiffUpdateManager returned null");
-			return;
-		}
+		if(processedData == null) return;
 		
 		// 使用原始窗口尺寸（非缩放），接收端根据这个尺寸计算世界大小
 		int originalW = toplevel.geometry.width();
 		int originalH = toplevel.geometry.height();
 		
-		// 从本地WindowDisplay获取窗口变换（pivot/normal/down）
+		// 从本地WindowDisplay获取窗口变换
 		double pivotX = 0, pivotY = 0, pivotZ = 0;
 		double normalX = 0, normalY = 0, normalZ = 1;
 		double downX = 0, downY = -1, downZ = 0;
@@ -229,17 +242,38 @@ public class WindowShareManager {
 		);
 		ClientPlayNetworking.send(imagePayload);
 		
-		LOGGER.info("[SHARE] sent image payload: {} bytes, {}x{}", processedData.length, originalW, originalH);
-		
-		// 更新统计信息
+		// 更新统计
+		bytesSentThisSecond += processedData.length;
 		state.lastUpdateTime = System.currentTimeMillis();
 		state.frameCount++;
 		state.totalBytes += processedData.length;
+		state.currentFps = frameRateController.getCurrentFps(state.windowHandle);
+		state.currentBitrate = bytesSentThisSecond * 8 / 1000; // kbps
 	}
 	
 	/**
-	 * 获取本地窗口
+	 * 评估自适应质量
+	 * 超限 → 降低scale，低利用 → 提高scale
 	 */
+	private void evaluateAdaptiveQuality(ImageCapture.CaptureConfig config) {
+		if(config.maxBitrate <= 0) return; // 无码率限制时不做自适应
+		
+		long maxBytesPerSecond = (long)config.maxBitrate * 1000 / 8;
+		float utilization = maxBytesPerSecond > 0 ? (float)adaptiveFrameBytes / (maxBytesPerSecond * ADAPTIVE_EVAL_INTERVAL / 20) : 0;
+		
+		if(adaptiveOverLimitCount >= ADAPTIVE_EVAL_INTERVAL / 2) {
+			// 超过一半帧数都超限 → 降低质量
+			adaptiveScaleMultiplier = Math.max(ADAPTIVE_SCALE_MIN, adaptiveScaleMultiplier * ADAPTIVE_SCALE_DOWN);
+			LOGGER.info("[ADAPTIVE] Scale decreased to {} (over limit: {} frames)", String.format("%.2f", adaptiveScaleMultiplier), adaptiveOverLimitCount);
+			adaptiveOverLimitCount = 0;
+		} else if(utilization < 0.5f && adaptiveScaleMultiplier < ADAPTIVE_SCALE_MAX) {
+			// 利用率低于50% → 提高质量
+			adaptiveScaleMultiplier = Math.min(ADAPTIVE_SCALE_MAX, adaptiveScaleMultiplier * ADAPTIVE_SCALE_UP);
+			LOGGER.info("[ADAPTIVE] Scale increased to {} (utilization: {}%)", String.format("%.2f", adaptiveScaleMultiplier), String.format("%.1f", utilization * 100));
+			adaptiveUnderUtilCount = 0;
+		}
+	}
+	
 	@Nullable
 	private WLCToplevel getLocalWindow(long windowHandle) {
 		if(clientMod == null || clientMod.bridge == null) {
@@ -248,68 +282,85 @@ public class WindowShareManager {
 		return clientMod.bridge.getToplevel(windowHandle);
 	}
 	
-	/**
-	 * 处理断开连接
-	 */
 	private void handleDisconnect() {
 		shareStates.clear();
 		diffUpdateManager.clear();
 		frameRateController.clear();
+		adaptiveScaleMultiplier = 1.0f;
+		bytesSentThisSecond = 0;
 		LOGGER.info("Cleared all share states due to disconnect");
 	}
 	
-	/**
-	 * 获取共享状态
-	 */
 	@Nullable
 	public ShareState getShareState(long windowHandle) {
 		return shareStates.get(windowHandle);
 	}
 	
-	/**
-	 * 获取所有共享状态
-	 */
 	public Map<Long, ShareState> getAllShareStates() {
 		return Map.copyOf(shareStates);
 	}
 	
-	/**
-	 * 设置捕获配置
-	 */
 	public void setCaptureConfig(ImageCapture.CaptureConfig config) {
 		this.captureConfig = config;
-		LOGGER.info("Updated capture config: scale={}, quality={}, maxFps={}", 
-			config.scale, config.quality, config.maxFps);
+		LOGGER.info("Updated capture config: {}", config.getSummary());
 	}
 	
-	/**
-	 * 启用/禁用共享
-	 */
+	public void setPerWindowConfig(long windowHandle, ImageCapture.CaptureConfig config) {
+		ShareState state = shareStates.get(windowHandle);
+		if(state == null) {
+			LOGGER.warn("Cannot set per-window config: window 0x{} not shared", Long.toHexString(windowHandle));
+			return;
+		}
+		state.perWindowConfig = config;
+		LOGGER.info("Set per-window config for 0x{}: {}", Long.toHexString(windowHandle), config.getSummary());
+	}
+	
+	public void clearPerWindowConfig(long windowHandle) {
+		ShareState state = shareStates.get(windowHandle);
+		if(state != null) {
+			state.perWindowConfig = null;
+			LOGGER.info("Cleared per-window config for 0x{}", Long.toHexString(windowHandle));
+		}
+	}
+	
 	public void setSharingEnabled(boolean enabled) {
 		this.sharingEnabled = enabled;
 		LOGGER.info("Sharing {}", enabled ? "enabled" : "disabled");
 	}
 	
-	/**
-	 * 检查是否启用共享
-	 */
 	public boolean isSharingEnabled() {
 		return sharingEnabled;
 	}
 	
 	/**
-	 * 获取统计信息
+	 * 获取自适应缩放乘数（供stats命令使用）
 	 */
-	public String getStats() {
-		long totalFrames = shareStates.values().stream().mapToLong(s -> s.frameCount).sum();
-		long totalBytes = shareStates.values().stream().mapToLong(s -> s.totalBytes).sum();
-		
-		return String.format("Windows: %d, Frames: %d, Bytes: %d", 
-			shareStates.size(), totalFrames, totalBytes);
+	public float getAdaptiveScaleMultiplier() {
+		return adaptiveScaleMultiplier;
 	}
 	
 	/**
-	 * 共享状态内部类
+	 * 获取当前码率利用率（0.0-1.0+）
+	 */
+	public float getBitrateUtilization() {
+		if(captureConfig == null || captureConfig.maxBitrate <= 0) return 0;
+		long maxBytesPerSecond = (long)captureConfig.maxBitrate * 1000 / 8;
+		return maxBytesPerSecond > 0 ? (float)bytesSentThisSecond / maxBytesPerSecond : 0;
+	}
+	
+	public String getStats() {
+		long totalFrames = shareStates.values().stream().mapToLong(s -> s.frameCount).sum();
+		long totalBytes = shareStates.values().stream().mapToLong(s -> s.totalBytes).sum();
+		long totalSkipped = shareStates.values().stream().mapToLong(s -> s.skippedFrames).sum();
+		long totalRateLimited = shareStates.values().stream().mapToLong(s -> s.rateLimitedFrames).sum();
+		
+		return String.format("Windows: %d, Frames: %d, Skipped: %d, RateLimited: %d, Bytes: %d, Adaptive: %.2f, Utilization: %.1f%%", 
+			shareStates.size(), totalFrames, totalSkipped, totalRateLimited, totalBytes,
+			adaptiveScaleMultiplier, getBitrateUtilization() * 100);
+	}
+	
+	/**
+	 * 共享状态
 	 */
 	public static class ShareState {
 		public final long windowHandle;
@@ -319,11 +370,21 @@ public class WindowShareManager {
 		public long lastUpdateTime = 0;
 		public long frameCount = 0;
 		public long totalBytes = 0;
+		public long skippedFrames = 0;      // diff检测跳过的帧数
+		public long rateLimitedFrames = 0;   // 码率限制跳过的帧数
+		public int currentFps = 0;           // 当前实际帧率
+		public long currentBitrate = 0;      // 当前码率 (kbps)
+		
+		public ImageCapture.CaptureConfig perWindowConfig = null;
 		
 		public ShareState(long windowHandle, String windowTitle) {
 			this.windowHandle = windowHandle;
 			this.windowTitle = windowTitle;
 			this.startTime = System.currentTimeMillis();
+		}
+		
+		public ImageCapture.CaptureConfig getEffectiveConfig(ImageCapture.CaptureConfig globalConfig) {
+			return perWindowConfig != null ? perWindowConfig : globalConfig;
 		}
 	}
 }

@@ -45,15 +45,16 @@ public class FrameRateController {
 		long now = System.currentTimeMillis();
 		FrameData data = frameDataMap.computeIfAbsent(windowHandle, k -> new FrameData());
 		
-		// 计算最小间隔（毫秒）
 		long minInterval = 1000 / Math.max(MIN_FPS, Math.min(MAX_FPS, maxFps));
 		
-		// 检查是否达到最小间隔
 		if(now - data.lastUpdateTime < minInterval) {
 			return false;
 		}
 		
-		// 更新时间戳
+		// 记录帧间隔
+		if(data.lastUpdateTime > 0) {
+			data.lastInterval = now - data.lastUpdateTime;
+		}
 		data.lastUpdateTime = now;
 		data.frameCount++;
 		
@@ -144,10 +145,23 @@ public class FrameRateController {
 	}
 	
 	/**
+	 * 获取当前窗口的实际帧率（基于最近帧间隔估算）
+	 */
+	public int getCurrentFps(long windowHandle) {
+		FrameData data = frameDataMap.get(windowHandle);
+		if(data == null || data.frameCount < 2) return 0;
+		long elapsed = System.currentTimeMillis() - data.lastUpdateTime;
+		if(elapsed <= 0) return 0;
+		// 简单估算：用最近的帧间隔
+		return (int)(1000.0 / Math.max(1, data.lastInterval));
+	}
+	
+	/**
 	 * 帧数据内部类
 	 */
 	private static class FrameData {
 		long lastUpdateTime = 0;
 		long frameCount = 0;
+		long lastInterval = 50; // 最近一次帧间隔（ms）
 	}
 }

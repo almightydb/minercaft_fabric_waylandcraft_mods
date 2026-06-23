@@ -221,17 +221,17 @@ public class SharedWindowDisplay {
 		Identifier textureLocation = renderer.getTextureLocation_obj(windowHandle);
 		if(textureLocation == null) return;
 		
-		// 从renderer获取实际纹理尺寸（对应WindowDisplay的updateGeometry）
-		int renderWidth = this.width;
-		int renderHeight = this.height;
-		if(renderWidth <= 0 || renderHeight <= 0) {
-			int[] dims = renderer.getTextureDimensions(windowHandle);
-			if(dims != null && dims[0] > 0 && dims[1] > 0) {
-				renderWidth = dims[0];
-				renderHeight = dims[1];
-			} else {
-				return;
-			}
+		// 始终使用纹理实际尺寸（而非原始窗口尺寸），避免缩放导致的黑边
+		int[] dims = renderer.getTextureDimensions(windowHandle);
+		int renderWidth, renderHeight;
+		if(dims != null && dims[0] > 0 && dims[1] > 0) {
+			renderWidth = dims[0];
+			renderHeight = dims[1];
+		} else if(this.width > 0 && this.height > 0) {
+			renderWidth = this.width;
+			renderHeight = this.height;
+		} else {
+			return;
 		}
 		
 		// 与WindowDisplay.render()完全一致的向量计算

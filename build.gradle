@@ -26,6 +26,10 @@ dependencies {
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 	
+	// JNA for X11 window listing (packed into jar)
+	implementation "net.java.dev.jna:jna:5.14.0"
+	implementation "net.java.dev.jna:jna-platform:5.14.0"
+	
 }
 
 processResources {

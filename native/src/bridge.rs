@@ -5,7 +5,7 @@ use crate::java_types::*;
 use crate::utils::get_time;
 use crate::xdg_spec::RawDesktopEntry;
 use crate::{WaylandCraft, wlc_init};
-use jni::objects::{JIntArray, JLongArray, JObjectArray, JPrimitiveArray};
+use jni::objects::{JByteArray, JIntArray, JLongArray, JObject, JObjectArray, JPrimitiveArray};
 use jni::{
     Env, bind_java_type,
     objects::{JClass, JString},
@@ -372,6 +372,24 @@ bind_java_type! {
         static extern fn dnd_icon {
             sig = (instance: jlong) -> jlong,
             fn = dnd_icon,
+        },
+
+        static extern fn get_desktop_windows {
+            sig = (instance: jlong) -> JString[],
+            fn = get_desktop_windows,
+        },
+
+        static extern fn portal_capture_start {
+            sig = (instance: jlong) -> byte[],
+            fn = portal_capture_start,
+        },
+        static extern fn portal_capture_frame {
+            sig = (instance: jlong) -> byte[],
+            fn = portal_capture_frame,
+        },
+        static extern fn portal_capture_stop {
+            sig = (instance: jlong) -> void,
+            fn = portal_capture_stop,
         },
     },
 }
@@ -1948,4 +1966,78 @@ fn dnd_icon<'local>(
         }
         None => Ok(0),
     }
+}
+
+// ═══════════════════════════════════════════════════════
+// Portal ScreenCast 捕获 (XDG Desktop Portal, 跨桌面通用)
+// ═══════════════════════════════════════════════════════
+
+fn portal_capture_start<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    _instance: jlong,
+) -> Result<JPrimitiveArray<'local, i8>, BridgeError> {
+    // 1. Portal: CreateSession → SelectSources → Start (用户确认)
+    let node_id = crate::portal_capture::start_portal_capture()
+        .map_err(|e| BridgeError::Null("portal_capture_failed"))?;
+
+    // 2. 连接 PipeWire 读帧
+    crate::portal_capture::start_pw_stream(node_id)
+        .map_err(|e| BridgeError::Null("portal_capture_failed"))?;
+
+    let result = format!("ok:{}", node_id);
+    let byte_array = env.byte_array_from_slice(result.as_bytes())?;
+    Ok(byte_array)
+}
+
+fn portal_capture_frame<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    _instance: jlong,
+) -> Result<JPrimitiveArray<'local, i8>, BridgeError> {
+    if let Some(frame) = crate::portal_capture::get_frame() {
+        let mut data = Vec::with_capacity(8 + frame.data.len());
+        data.extend_from_slice(&frame.width.to_le_bytes());
+        data.extend_from_slice(&frame.height.to_le_bytes());
+        data.extend_from_slice(&frame.data);
+        let byte_array = env.byte_array_from_slice(&data)?;
+        return Ok(byte_array);
+    }
+
+    let empty = env.byte_array_from_slice(&[])?;
+    Ok(empty)
+}
+
+fn portal_capture_stop<'local>(
+    _env: &mut Env<'local>,
+    _class: JClass<'local>,
+    _instance: jlong,
+) -> Result<(), BridgeError> {
+    // PipeWire mainloop runs in a thread, will exit when process exits
+    Ok(())
+}
+
+fn get_desktop_windows<'local>(
+    env: &mut Env<'local>,
+    _class: JClass<'local>,
+    _instance: jlong,
+) -> Result<JObjectArray<'local, JString<'local>>, BridgeError> {
+    let windows = crate::desktop_windows::get_desktop_windows();
+
+    if windows.is_empty() {
+        return Ok(JObjectArray::<JString>::new(env, 0, &JString::null())?);
+    }
+
+    let result_array = JObjectArray::<JString>::new(env, windows.len(), &JString::null())?;
+
+    for (i, w) in windows.iter().enumerate() {
+        let formatted = format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            w.window_id, w.title, w.app_id, w.pid, w.hash, w.x, w.y, w.width, w.height
+        );
+        let jstr = env.new_string(&formatted)?;
+        result_array.set_element(env, i, &jstr)?;
+    }
+
+    Ok(result_array)
 }

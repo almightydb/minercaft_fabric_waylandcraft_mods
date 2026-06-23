@@ -468,6 +468,31 @@ public class WaylandCraftBridge {
 		return toplevels.stream().filter((w) -> w.getHandle() == handle).findAny().orElse(null);
 	}
 	
+	/**
+	 * 注册捕获的虚拟 Toplevel
+	 */
+	public void registerCapturedToplevel(WLCToplevel toplevel) {
+		toplevels.add(toplevel);
+		newToplevels.add(toplevel);
+	}
+	
+	/**
+	 * 注销捕获的虚拟 Toplevel
+	 */
+	public void unregisterCapturedToplevel(WLCToplevel toplevel) {
+		toplevels.remove(toplevel);
+		newToplevels.remove(toplevel);
+		focusOrder.remove(toplevel);
+	}
+	
+	/**
+	 * 获取桌面窗口列表（通过 /proc）
+	 * 返回格式：["pid:cmdline", ...]
+	 */
+	public String[] getDesktopWindows() {
+		return getDesktopWindows(this.instance);
+	}
+	
 	public WLCPopup[] getPopups() {
 		return popups.toArray(new WLCPopup[popups.size()]);
 	}
@@ -806,5 +831,20 @@ public class WaylandCraftBridge {
 	private static native void dndDrop(long instance);
 	private static native void dndMotion(long instance, long surfaceHandle, double x, double y);
 	private static native long dndIcon(long instance);
+	
+	// 获取桌面窗口列表（通过 /proc）
+	private static native String[] getDesktopWindows(long instance);
+	
+	// Portal ScreenCast 捕获 (XDG Desktop Portal, 跨桌面通用)
+	private static native byte[] portalCaptureStart(long instance);
+	private static native byte[] portalCaptureFrame(long instance);
+	private static native void portalCaptureStop(long instance);
+	
+	/** 启动 Portal 捕获会话（会弹出确认对话框） */
+	public byte[] portalCaptureStart() { return portalCaptureStart(this.instance); }
+	/** 获取当前帧: [width(4), height(4), rgba...] */
+	public byte[] portalCaptureFrame() { return portalCaptureFrame(this.instance); }
+	/** 停止捕获 */
+	public void portalCaptureStop() { portalCaptureStop(this.instance); }
 	
 }

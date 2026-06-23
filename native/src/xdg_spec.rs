@@ -117,16 +117,38 @@ impl XDGSpecHelper {
         app_id: String,
         env: Vec<(OsString, OsString)>,
     ) -> Option<()> {
-        let entry = find_app_by_id(&self.entries, Ascii::new(&app_id))?;
-        let exec = entry.exec()?;
+        let entry = find_app_by_id(&self.entries, Ascii::new(&app_id));
+        if entry.is_none() {
+            eprintln!("[waylandcraft] _exec_app: app_id={:?} NOT FOUND in {} entries", app_id, self.entries.len());
+            return None;
+        }
+        let entry = entry.unwrap();
+        let exec = entry.exec();
+        if exec.is_none() {
+            eprintln!("[waylandcraft] _exec_app: app_id={:?} found but no exec line", app_id);
+            return None;
+        }
+        let exec = exec.unwrap();
+        eprintln!("[waylandcraft] _exec_app: app_id={:?}, exec={:?}", app_id, exec);
         let mut args = split_exec(exec).ok()?;
 
         if args.is_empty() {
+            eprintln!("[waylandcraft] _exec_app: args empty after split");
             return None;
         }
 
         let cmd = args.remove(0);
-        spawn(cmd, args, env).ok()?;
+        eprintln!("[waylandcraft] _exec_app: spawning cmd={:?}, args={:?}", cmd, args);
+
+        // 从 env 中提取 WAYLAND_DISPLAY 和 XDG_RUNTIME_DIR
+        let wayland_display = env.iter()
+            .find(|(k, _)| k == "WAYLAND_DISPLAY")
+            .map(|(_, v)| v.to_string_lossy().to_string())
+            .unwrap_or_else(|| "wayland-0".to_string());
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+            .unwrap_or_else(|_| "/run/user/1000".to_string());
+
+        spawn(cmd, args, env, wayland_display, runtime_dir).ok()?;
 
         Some(())
     }
