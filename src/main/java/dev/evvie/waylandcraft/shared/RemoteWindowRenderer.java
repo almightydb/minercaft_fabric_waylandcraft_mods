@@ -2,7 +2,6 @@ package dev.evvie.waylandcraft.shared;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -97,20 +96,10 @@ public class RemoteWindowRenderer {
 				return;
 			}
 			
-			// 用 MemoryUtil 创建 ByteBuffer 包装原生内存
-			// NativeImage 内存布局：每像素 4 字节 (ABGR)，连续排列
-			ByteBuffer nativeBuffer = MemoryUtil.memByteBuffer(ptr, decodedW * decodedH * 4);
-			
-			// 批量写入 ABGR 像素（直接内存写入，无 JNI 开销）
-			for(int i = 0; i < argbPixels.length; i++) {
-				int argb = argbPixels[i];
-				int a = (argb >> 24) & 0xFF;
-				int r = (argb >> 16) & 0xFF;
-				int g = (argb >> 8) & 0xFF;
-				int b = argb & 0xFF;
-				int abgr = (a << 24) | (b << 16) | (g << 8) | r;
-				nativeBuffer.putInt(i * 4, abgr);
-			}
+			// NativeImage 内存布局：每像素 4 字节，通道字节序 = A,B,G,R（pixel offset 0 = A 字节）
+			// 必须用 memPutByte 逐字节写入 — putInt 会按 JVM LE 字节序把 int 写为 [R,G,B,A],
+			// 索引 0 是 A 而不是 R，等于把通道对调，渲染出来全花。逐字节写 A,B,G,R 才行。
+			writeArgbPixelsToNative(ptr, argbPixels);
 			
 			// 上传到 GPU（不重建纹理对象，不重新 register）
 			entry.texture.upload();
@@ -141,16 +130,30 @@ public class RemoteWindowRenderer {
 		long ptr = nativeImage.getPointer();
 		if(ptr == 0L) return;
 		
-		ByteBuffer nativeBuffer = MemoryUtil.memByteBuffer(ptr, width * height * 4);
+		writeArgbPixelsToNative(ptr, argbPixels);
+		entry.texture.upload();
+	}
+	
+	/**
+	 * 把 ARGB int 像素数组写入 NativeImage 原生内存（通过绝对 ptr）
+	 * 
+	 * 字节序：A,B,G,R（offset 0 = A 字节）
+	 * 一次写一个 byte，避免堆 ByteBuffer + putInt 的 JVM 字节序重排坑。
+	 */
+	private static void writeArgbPixelsToNative(long ptr, int[] argbPixels) {
+		long offset = ptr;
 		for(int i = 0; i < argbPixels.length; i++) {
 			int argb = argbPixels[i];
-			int a = (argb >> 24) & 0xFF;
-			int r = (argb >> 16) & 0xFF;
-			int g = (argb >> 8) & 0xFF;
+			int a = (argb >>> 24) & 0xFF;
+			int r = (argb >>> 16) & 0xFF;
+			int g = (argb >>> 8) & 0xFF;
 			int b = argb & 0xFF;
-			nativeBuffer.putInt(i * 4, (a << 24) | (b << 16) | (g << 8) | r);
+			MemoryUtil.memPutByte(offset,     (byte) a);
+			MemoryUtil.memPutByte(offset + 1, (byte) b);
+			MemoryUtil.memPutByte(offset + 2, (byte) g);
+			MemoryUtil.memPutByte(offset + 3, (byte) r);
+			offset += 4;
 		}
-		entry.texture.upload();
 	}
 	
 	@Nullable

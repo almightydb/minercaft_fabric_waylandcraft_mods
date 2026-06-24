@@ -248,33 +248,45 @@ public class SharedWindowServerHandler {
 		broadcastWindowListToAll(manager);
 	}
 	
-	/**
-	 * 广播窗口列表给所有在线玩家
-	 */
-	private static void broadcastWindowListToAll(SharedWindowManager manager) {
-		List<SharedWindowListPayload.WindowInfo> windowList = new ArrayList<>();
+/**
+ * 广播窗口列表给所有在线玩家
+ * 
+ * 修复：每个玩家看到的窗口列表不同——只有自己有权 VIEW 的窗口才出现在其列表里，
+ * 且 perm 字段是该玩家对此窗口的真实权限，而非硬编码 VIEW。
+ * 
+ * 否则：黑名单/未授权玩家也能看到所有窗口的 handle/title，泄露元数据。
+ */
+private static void broadcastWindowListToAll(SharedWindowManager manager) {
+	var server = WaylandCraftCommon.instance.server;
+	if(server == null) {
+		return;
+	}
+	
+	int totalWindows = manager.getAllWindows().size();
+	for(ServerPlayer player : server.getPlayerList().getPlayers()) {
+		UUID playerUUID = player.getUUID();
+		List<SharedWindowListPayload.WindowInfo> visible = new ArrayList<>();
 		
 		for(SharedWindowEntry entry : manager.getAllWindows()) {
-			// 为每个玩家创建不同的窗口列表（权限不同）
-			windowList.add(new SharedWindowListPayload.WindowInfo(
+			WindowPermission perm = entry.getPermission(playerUUID);
+			// 跳过 NONE（黑名单/未授权玩家对该窗口完全不可见），防 handle/title 元数据泄露
+			if(perm == WindowPermission.NONE) {
+				continue;
+			}
+			visible.add(new SharedWindowListPayload.WindowInfo(
 				entry.getWindowHandle(),
 				entry.getOwnerUUID(),
 				entry.getWindowTitle(),
-				WindowPermission.VIEW // 默认权限，实际需要为每个玩家单独计算
+				perm
 			));
 		}
 		
-		SharedWindowListPayload listPayload = new SharedWindowListPayload(windowList);
-		
-		// 发送给所有在线玩家
-		var server = WaylandCraftCommon.instance.server;
-		if(server != null) {
-			for(ServerPlayer player : server.getPlayerList().getPlayers()) {
-				ServerPlayNetworking.send(player, listPayload);
-			}
-		}
-		LOGGER.info("Broadcasting window list: {} windows", windowList.size());
+		SharedWindowListPayload listPayload = new SharedWindowListPayload(visible);
+		ServerPlayNetworking.send(player, listPayload);
 	}
+	
+	LOGGER.info("Broadcasting window list: {} windows total", totalWindows);
+}
 	
 	/**
 	 * 广播窗口状态更新给订阅者
