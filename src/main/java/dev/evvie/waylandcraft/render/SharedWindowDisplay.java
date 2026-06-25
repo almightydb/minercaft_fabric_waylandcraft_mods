@@ -221,16 +221,13 @@ public class SharedWindowDisplay {
 		Identifier textureLocation = renderer.getTextureLocation_obj(windowHandle);
 		if(textureLocation == null) return;
 		
-		// 始终使用纹理实际尺寸（而非原始窗口尺寸），避免缩放导致的黑边
+		// 用纹理实际尺寸作为渲染尺寸（JPEG解码后可能和原始窗口尺寸不同）
 		int[] dims = renderer.getTextureDimensions(windowHandle);
-		int renderWidth, renderHeight;
 		if(dims != null && dims[0] > 0 && dims[1] > 0) {
-			renderWidth = dims[0];
-			renderHeight = dims[1];
-		} else if(this.width > 0 && this.height > 0) {
-			renderWidth = this.width;
-			renderHeight = this.height;
-		} else {
+			// 同步到 width/height，让 origin() 用相同尺寸计算
+			this.width = dims[0];
+			this.height = dims[1];
+		} else if(this.width <= 0 || this.height <= 0) {
 			return;
 		}
 		
@@ -243,9 +240,9 @@ public class SharedWindowDisplay {
 
 		// 远程纹理没有xoff/yoff（不需要bufOffset）
 		Vec3 tl = new Vec3(0, 0, 0);
-		Vec3 bl = localY.scale(renderHeight);
-		Vec3 br = bl.add(localX.scale(renderWidth));
-		Vec3 tr = localX.scale(renderWidth);
+		Vec3 bl = localY.scale(this.height);
+		Vec3 br = bl.add(localX.scale(this.width));
+		Vec3 tr = localX.scale(this.width);
 		
 		PoseStack poseStack = ctx.poseStack();
 		poseStack.pushPose();

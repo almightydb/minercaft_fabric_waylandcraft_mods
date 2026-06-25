@@ -2,7 +2,6 @@ package dev.evvie.waylandcraft.shared;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -21,141 +20,83 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.resources.Identifier;
 
-/**
- * 远程窗口渲染器（终极优化版）
- * 
- * 优化内容：
- * 1. 原地纹理更新：保留 DynamicTexture + NativeImage，不 close/new/register
- * 2. 直接内存写入：通过 getPointer() + MemoryUtil 写入原生内存，跳过 setPixelABGR JNI
- * 3. 批量解码：getRGB 一次获取所有像素
- */
 public class RemoteWindowRenderer {
 	
 	private static final Logger LOGGER = LoggerFactory.getLogger("waylandcraft-remote-renderer");
 	
+	// 远程窗口纹理缓存: windowHandle -> TextureEntry
 	private final Map<Long, TextureEntry> textureCache = new ConcurrentHashMap<>();
 	
+	// 最大缓存纹理数量
 	private static final int MAX_CACHED_TEXTURES = 50;
-	private static final int CLEANUP_INTERVAL = 600;
+	
+	// 纹理清理间隔 (ticks)
+	private static final int CLEANUP_INTERVAL = 600; // 30秒
 	private int tickCounter = 0;
 	
 	public RemoteWindowRenderer() {
 		LOGGER.info("RemoteWindowRenderer initialized");
 	}
 	
+	/**
+	 * 获取纹理位置标识符
+	 */
 	private Identifier getTextureLocation(long windowHandle) {
 		return Identifier.fromNamespaceAndPath(WaylandCraftCommon.MOD_ID, "remote_" + windowHandle);
 	}
 	
 	/**
-	 * 更新远程窗口纹理（终极优化：原地内存写入 + upload）
+	 * 更新远程窗口纹理
 	 */
 	public void updateTexture(long windowHandle, int x, int y, int width, int height, byte[] jpegData) {
-		TextureEntry entry = textureCache.get(windowHandle);
-		
-		// 解码 JPEG
-		int[] argbPixels;
-		int decodedW, decodedH;
+		// 解码JPEG获取实际尺寸
+		NativeImage image;
 		try {
-			BufferedImage bufferedImage = ImageIO.read(new ByteArrayInputStream(jpegData));
-			if(bufferedImage == null) {
-				LOGGER.warn("ImageIO.read returned null ({} bytes)", jpegData.length);
-				return;
-			}
-			decodedW = bufferedImage.getWidth();
-			decodedH = bufferedImage.getHeight();
-			// 批量获取所有像素（1次JNI调用）
-			argbPixels = bufferedImage.getRGB(0, 0, decodedW, decodedH, null, 0, decodedW);
+			image = decodeImageData(jpegData, width, height);
 		} catch(Exception e) {
-			LOGGER.error("Failed to decode JPEG ({} bytes)", jpegData.length, e);
+			LOGGER.error("Failed to decode image for window 0x{}", Long.toHexString(windowHandle), e);
 			return;
 		}
+		if(image == null) return;
 		
-		// 尺寸变化或首次创建
-		if(entry == null || entry.width != decodedW || entry.height != decodedH) {
+		int actualWidth = image.getWidth();
+		int actualHeight = image.getHeight();
+		
+		TextureEntry entry = textureCache.get(windowHandle);
+		
+		// 尺寸变化或首次创建时重建纹理
+		if(entry == null || entry.width != actualWidth || entry.height != actualHeight) {
 			destroyTexture(windowHandle);
-			entry = createTexture(windowHandle, decodedW, decodedH);
-			if(entry == null) return;
-		}
-		
-		// === 原地更新：直接写入 NativeImage 原生内存 ===
-		try {
-			NativeImage nativeImage = entry.texture.getPixels();
-			if(nativeImage == null || nativeImage.isClosed()) {
-				// NativeImage 无效，重建
-				destroyTexture(windowHandle);
-				entry = createTexture(windowHandle, decodedW, decodedH);
-				if(entry == null) return;
-				nativeImage = entry.texture.getPixels();
-				if(nativeImage == null) return;
-			}
-			
-			// 通过 getPointer() 直接访问原生内存
-			long ptr = nativeImage.getPointer();
-			if(ptr == 0L) {
-				LOGGER.warn("NativeImage pointer is null for window 0x{}", Long.toHexString(windowHandle));
+			entry = createTexture(windowHandle, actualWidth, actualHeight);
+			if(entry == null) {
+				image.close();
 				return;
 			}
+		}
+		
+		// 更新纹理
+		try {
+			// 创建新纹理并注册（DynamicTexture内部复用NativeImage生命周期）
+			entry.texture.close();
+			DynamicTexture newTexture = new DynamicTexture(() -> "remote_window_" + Long.toHexString(windowHandle), image);
+			entry.texture = newTexture;
 			
-			// 用 MemoryUtil 创建 ByteBuffer 包装原生内存
-			// NativeImage 内存布局：每像素 4 字节 (ABGR)，连续排列
-			ByteBuffer nativeBuffer = MemoryUtil.memByteBuffer(ptr, decodedW * decodedH * 4);
+			TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+			textureManager.register(entry.location, newTexture);
 			
-			// 批量写入 ABGR 像素（直接内存写入，无 JNI 开销）
-			for(int i = 0; i < argbPixels.length; i++) {
-				int argb = argbPixels[i];
-				int a = (argb >> 24) & 0xFF;
-				int r = (argb >> 16) & 0xFF;
-				int g = (argb >> 8) & 0xFF;
-				int b = argb & 0xFF;
-				int abgr = (a << 24) | (b << 16) | (g << 8) | r;
-				nativeBuffer.putInt(i * 4, abgr);
-			}
-			
-			// 上传到 GPU（不重建纹理对象，不重新 register）
-			entry.texture.upload();
 			entry.lastUpdate = System.currentTimeMillis();
-			
 		} catch(Exception e) {
-			LOGGER.error("Failed to update texture in-place for window 0x{}", Long.toHexString(windowHandle), e);
-			// 回退：完全重建
-			destroyTexture(windowHandle);
-			entry = createTexture(windowHandle, decodedW, decodedH);
-			if(entry != null) {
-				try {
-					writePixelsAndUpload(entry, argbPixels, decodedW, decodedH);
-				} catch(Exception e2) {
-					LOGGER.error("Fallback also failed", e2);
-				}
-			}
+			LOGGER.error("Failed to update texture for window 0x{}", Long.toHexString(windowHandle), e);
 		}
 	}
 	
 	/**
-	 * 写入像素并上传（用于首次创建和回退）
+	 * 创建新纹理
 	 */
-	private void writePixelsAndUpload(TextureEntry entry, int[] argbPixels, int width, int height) {
-		NativeImage nativeImage = entry.texture.getPixels();
-		if(nativeImage == null) return;
-		
-		long ptr = nativeImage.getPointer();
-		if(ptr == 0L) return;
-		
-		ByteBuffer nativeBuffer = MemoryUtil.memByteBuffer(ptr, width * height * 4);
-		for(int i = 0; i < argbPixels.length; i++) {
-			int argb = argbPixels[i];
-			int a = (argb >> 24) & 0xFF;
-			int r = (argb >> 16) & 0xFF;
-			int g = (argb >> 8) & 0xFF;
-			int b = argb & 0xFF;
-			nativeBuffer.putInt(i * 4, (a << 24) | (b << 16) | (g << 8) | r);
-		}
-		entry.texture.upload();
-	}
-	
 	@Nullable
 	private TextureEntry createTexture(long windowHandle, int width, int height) {
 		try {
+			// 检查缓存限制
 			if(textureCache.size() >= MAX_CACHED_TEXTURES) {
 				cleanupOldTextures();
 			}
@@ -178,6 +119,9 @@ public class RemoteWindowRenderer {
 		}
 	}
 	
+	/**
+	 * 销毁纹理
+	 */
 	public void destroyTexture(long windowHandle) {
 		TextureEntry entry = textureCache.remove(windowHandle);
 		if(entry != null) {
@@ -187,25 +131,104 @@ public class RemoteWindowRenderer {
 		}
 	}
 	
+	/**
+	 * 获取纹理位置用于渲染
+	 */
 	@Nullable
 	public Identifier getTextureLocation_obj(long windowHandle) {
 		TextureEntry entry = textureCache.get(windowHandle);
 		return entry != null ? entry.location : null;
 	}
 	
+	/**
+	 * 检查纹理是否存在
+	 */
 	public boolean hasTexture(long windowHandle) {
 		return textureCache.containsKey(windowHandle);
 	}
 	
+	/**
+	 * 获取纹理尺寸
+	 */
 	public int[] getTextureDimensions(long windowHandle) {
 		TextureEntry entry = textureCache.get(windowHandle);
 		if(entry == null) return null;
 		return new int[]{entry.width, entry.height};
 	}
 	
+	/**
+	 * 解码JPEG图像数据为NativeImage
+	 * 
+	 * 关键：MC 26.1.2 的 NativeImage 内部用 ByteBuffer（默认 BIG_ENDIAN）存储像素。
+	 * setPixelABGR 用 ByteBuffer.putInt 写入，big-endian 下 int 0xAABBGGRR 写为 [AA,BB,GG,RR]，
+	 * 而 GPU 按 RGBA 读 → R=AA, G=BB, B=GG, A=RR → alpha 实际是原始 R 通道！
+	 * → 低 R 值颜色（蓝/绿/黑）alpha≈0 → ALPHA_CUTOUT discard → "部分颜色变透明"
+	 * 
+	 * 修复：绕过 setPixelABGR，用 MemoryUtil.memPutInt（platform native LE）直接写，
+	 * LE 下 int 0xAABBGGRR 写为 [RR,GG,BB,AA] = RGBA，GPU 正确读取。
+	 */
+	@Nullable
+	private NativeImage decodeImageData(byte[] data, int width, int height) {
+		try {
+			// 用ImageIO解码JPEG数据
+			BufferedImage bufferedImage = ImageIO.read(new ByteArrayInputStream(data));
+			if(bufferedImage == null) {
+				LOGGER.warn("ImageIO.read returned null (invalid JPEG data, {} bytes)", data.length);
+				return null;
+			}
+			
+			int w = bufferedImage.getWidth();
+			int h = bufferedImage.getHeight();
+			NativeImage image = new NativeImage(w, h, false);
+			
+			long ptr = image.getPointer();
+			if(ptr == 0L) {
+				LOGGER.error("NativeImage pointer is null after construction");
+				image.close();
+				return null;
+			}
+			
+			for(int y = 0; y < h; y++) {
+				for(int x = 0; x < w; x++) {
+					int argb = bufferedImage.getRGB(x, y);
+					int a = (argb >>> 24) & 0xFF;
+					int r = (argb >>> 16) & 0xFF;
+					int g = (argb >>> 8)  & 0xFF;
+					int b = argb & 0xFF;
+					// ABGR packed int: A in bits[31..24], B[23..16], G[15..8], R[7..0]
+					// MemoryUtil.memPutInt 在 LE JVM 上写为 [R,G,B,A] = GL_RGBA ✓
+					int abgrPacked = (a << 24) | (b << 16) | (g << 8) | r;
+					MemoryUtil.memPutInt(ptr + (long)(y * w + x) * 4L, abgrPacked);
+				}
+			}
+			
+			// 日志：首像素验证
+			if(LOGGER.isDebugEnabled()) {
+				int firstArgb = bufferedImage.getRGB(0, 0);
+				int fa = (firstArgb >>> 24) & 0xFF;
+				int fr = (firstArgb >>> 16) & 0xFF;
+				int fg = (firstArgb >>> 8)  & 0xFF;
+				int fb = firstArgb & 0xFF;
+				int fabgr = (fa << 24) | (fb << 16) | (fg << 8) | fr;
+				long written = MemoryUtil.memGetInt(ptr);
+				LOGGER.debug("decodeImageData: first pixel ARGB=0x{} a={} r={} g={} b={} -> ABGR_packed=0x{} written=0x{}",
+					Integer.toHexString(firstArgb), fa, fr, fg, fb,
+					Integer.toHexString(fabgr), Long.toHexString(written & 0xFFFFFFFFL));
+			}
+			
+			return image;
+		} catch(Exception e) {
+			LOGGER.error("Failed to decode JPEG image data ({} bytes)", data.length, e);
+			return null;
+		}
+	}
+	
+	/**
+	 * 清理旧纹理
+	 */
 	private void cleanupOldTextures() {
 		long now = System.currentTimeMillis();
-		long threshold = 30000;
+		long threshold = 30000; // 30秒
 		
 		textureCache.entrySet().removeIf(entry -> {
 			if(now - entry.getValue().lastUpdate > threshold) {
@@ -218,6 +241,9 @@ public class RemoteWindowRenderer {
 		});
 	}
 	
+	/**
+	 * 定期清理
+	 */
 	public void tick() {
 		tickCounter++;
 		if(tickCounter >= CLEANUP_INTERVAL) {
@@ -226,6 +252,9 @@ public class RemoteWindowRenderer {
 		}
 	}
 	
+	/**
+	 * 清理所有纹理
+	 */
 	public void clear() {
 		TextureManager textureManager = Minecraft.getInstance().getTextureManager();
 		textureCache.values().forEach(entry -> textureManager.release(entry.location));
@@ -233,6 +262,9 @@ public class RemoteWindowRenderer {
 		LOGGER.info("RemoteWindowRenderer cleared");
 	}
 	
+	/**
+	 * 纹理条目
+	 */
 	private static class TextureEntry {
 		DynamicTexture texture;
 		final Identifier location;

@@ -56,6 +56,8 @@ public class ImageCapture {
 	private static int pboIndex = 0;
 	private static int pboWidth = 0;
 	private static int pboHeight = 0;
+	// 0=PBO刚分配未seed, 1=只有 pbo[0] 已含有效数据, 2=两者皆就绪 → 走完整异步双缓冲
+	private static int pboSeedStage = 0;
 	
 	// GPU缩放用临时FBO+纹理
 	private static int scaleFbo = 0;
@@ -110,6 +112,7 @@ public class ImageCapture {
 			return null;
 		}
 		
+		int readFbo = 0;
 		try {
 			int glTexId = ((com.mojang.blaze3d.opengl.GlTexture) colorTex).glId();
 			
@@ -120,15 +123,13 @@ public class ImageCapture {
 			dstH = Math.min(dstH, MAX_HEIGHT);
 			
 			// Step 1: GPU侧缩放 — glBlitFramebuffer
-			int readFbo = GL30.glGenFramebuffers();
+			readFbo = GL30.glGenFramebuffers();
 			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
 			GL30.glFramebufferTexture2D(GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, glTexId, 0);
 			
 			int readStatus = GL30.glCheckFramebufferStatus(GL30.GL_READ_FRAMEBUFFER);
 			if(readStatus != GL30.GL_FRAMEBUFFER_COMPLETE) {
 				LOGGER.error("Source FBO incomplete: 0x{}", Integer.toHexString(readStatus));
-				GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
-				GL30.glDeleteFramebuffers(readFbo);
 				return null;
 			}
 			
@@ -148,19 +149,11 @@ public class ImageCapture {
 			int blitError = GL11.glGetError();
 			if(blitError != GL11.GL_NO_ERROR) {
 				LOGGER.error("glBlitFramebuffer error: 0x{}", Integer.toHexString(blitError));
-				GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
-				GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
-				GL30.glDeleteFramebuffers(readFbo);
 				return null;
 			}
 			
-			// Step 2: PBO异步回读
+			// Step 2: PBO异步回读（首帧走 sync；后续异步优化 hit rate）
 			ByteBuffer pixelData = readPixelsViaPbo(dstW, dstH);
-			
-			// 清理临时FBO
-			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
-			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
-			GL30.glDeleteFramebuffers(readFbo);
 			
 			if(pixelData == null) {
 				return null;
@@ -172,6 +165,14 @@ public class ImageCapture {
 		} catch(Exception e) {
 			LOGGER.error("Failed to capture from framebuffer", e);
 			return null;
+		} finally {
+			// finally 保证：异常 / 早期 return / 正常完成 → 都回收临时 GL 资源
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
+			GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+			if(readFbo != 0) {
+				GL30.glDeleteFramebuffers(readFbo);
+			}
 		}
 	}
 	
@@ -192,6 +193,7 @@ public class ImageCapture {
 		var colorTex = target.getColorTexture();
 		if(colorTex == null || colorTex.isClosed()) return null;
 		
+		int readFbo = 0;
 		try {
 			int glTexId = ((com.mojang.blaze3d.opengl.GlTexture) colorTex).glId();
 			
@@ -201,7 +203,7 @@ public class ImageCapture {
 			dstH = Math.min(dstH, MAX_HEIGHT);
 			
 			// 源FBO
-			int readFbo = GL30.glGenFramebuffers();
+			readFbo = GL30.glGenFramebuffers();
 			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
 			GL30.glFramebufferTexture2D(GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, glTexId, 0);
 			
@@ -224,10 +226,6 @@ public class ImageCapture {
 			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, scaleFbo);
 			GL11.glReadPixels(0, 0, dstW, dstH, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, reusableBuffer);
 			
-			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
-			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
-			GL30.glDeleteFramebuffers(readFbo);
-			
 			// 转为byte[]
 			byte[] result = new byte[needed];
 			reusableBuffer.rewind();
@@ -237,6 +235,13 @@ public class ImageCapture {
 		} catch(Exception e) {
 			LOGGER.error("Failed to capture raw frame", e);
 			return null;
+		} finally {
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+			GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, 0);
+			GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+			if(readFbo != 0) {
+				GL30.glDeleteFramebuffers(readFbo);
+			}
 		}
 	}
 	
@@ -300,8 +305,31 @@ public class ImageCapture {
 			
 			pboWidth = width;
 			pboHeight = height;
-			pboIndex = 0;
+			// pboIndex = 1 让首次 mapIndex = 0 落到一个未初始化 PBO，mapBuffer 会返 null
+			pboIndex = 1;
+			pboSeedStage = 0;
 			LOGGER.debug("Initialized PBOs: {}x{} ({} bytes each)", width, height, dataSize);
+		}
+		
+		// 首两次访问（pboSeedStage 0→1→2）强制走 sync ——
+		// sync 读出当前帧后顺势 DMA 写到一个 PBO（驱动把它填好），
+		// 让下一帧 map 那个 PBO 时拿到刚写的有效数据，而不是 GPU 显存里的"出厂"垃圾。
+		if(pboSeedStage < 2) {
+			int seedPbo = 1 - pboIndex;
+			ByteBuffer current = readPixelsSync(width, height);
+			if(current == null) {
+				return null;
+			}
+			GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, pboIds[seedPbo]);
+			GL15.glBufferData(GL21.GL_PIXEL_PACK_BUFFER, dataSize, GL15.GL_STREAM_READ);
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, scaleFbo);
+			GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, 0L);
+			GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, 0);
+			GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, 0);
+			
+			pboIndex = seedPbo;
+			pboSeedStage++;
+			return current;
 		}
 		
 		int readIndex = pboIndex;        // 当前帧写入这个PBO
@@ -408,14 +436,25 @@ public class ImageCapture {
 	
 	/**
 	 * 清理PBO资源
+	 * 加 glIsBuffer 校验：无效 ID 直传 glDeleteBuffers 在某些驱动（mesa gallium / nvidia legacy）会 SIGSEGV
 	 */
 	private static void cleanupPbos() {
 		if(pboIds != null) {
-			GL15.glDeleteBuffers(IntBuffer.wrap(pboIds));
+			int[] alive = new int[pboIds.length];
+			int n = 0;
+			for(int id : pboIds) {
+				if(id != 0 && GL15.glIsBuffer(id)) {
+					alive[n++] = id;
+				}
+			}
+			if(n > 0) {
+				GL15.glDeleteBuffers(IntBuffer.wrap(alive, 0, n));
+			}
 			pboIds = null;
 		}
 		pboWidth = 0;
 		pboHeight = 0;
+		pboSeedStage = 0;
 	}
 	
 	/**
